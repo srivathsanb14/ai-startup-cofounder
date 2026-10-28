@@ -27,7 +27,7 @@ class Config:
     model: str = "qwen2.5:7b-instruct"
     api_key: str = "ollama"
     temperature: float = 0.2
-    timeout: int = 180
+    timeout: int = 600
     max_tool_calls: int = 6
     max_workers: int = 4
     critic_rounds: int = 1  # review-and-redo rounds; 0 disables the critic loop

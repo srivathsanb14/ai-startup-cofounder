@@ -122,13 +122,13 @@ def evidence_grade(results: Dict[str, object], sources_count: int) -> Tuple[str,
     fact_ratio = facts / len(findings) if findings else 0.0
     comps = [c for c in (results.get("competitor").output.get("competitors", []) if results.get("competitor") else [])
              if isinstance(c, dict)][:3]
-    comp_ratio = sum(bool(c.get("verified")) for c in comps) / len(comps) if comps else 0.0
+    comp_ratio = sum(bool(c.get("verified")) for c in comps) / 3.0  # the target is three confirmed competitors, so finding one is not full marks
     errors = sum(bool(r.error) for r in results.values())
     score = 0.5 * fact_ratio + 0.2 * min(sources_count / 15.0, 1.0) + 0.2 * comp_ratio + 0.1 * (errors == 0)
     grade = "A" if score >= 0.7 else "B" if score >= 0.5 else "C" if score >= 0.3 else "D"
     reasons = ["%d%% of findings are sourced facts" % round(100 * fact_ratio),
                "%d sources collected" % sources_count,
-               "%d of %d top competitors confirmed in evidence" % (sum(bool(c.get("verified")) for c in comps), len(comps))]
+               "%d of 3 target competitors confirmed in evidence" % sum(bool(c.get("verified")) for c in comps)]
     if errors:
         reasons.append("%d agent(s) failed" % errors)
     return grade, reasons

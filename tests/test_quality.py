@@ -66,3 +66,11 @@ def test_grade_and_verdict_guardrail():
     assert verdict == "validate_first" and "grade is D" in note and "LTV/CAC" in note and "break-even" in note
     assert quality.cap_verdict("pivot", "D", {}, None) == ("pivot", "")
     assert quality.cap_verdict("???", "A", ue_good, 2)[0] == "validate_first"
+
+
+def test_real_world_mostly_estimates_with_one_competitor_is_not_graded_b():
+    # Mirrors the first live eval: 73 sources, 1 confirmed competitor, only 3 of 18 findings were facts.
+    findings = [Finding("f", "fact", ["E1"])] * 3 + [Finding("g", "estimate")] * 15
+    res = {"competitor": _result("competitor", {"competitors": [{"verified": True}]}, findings)}
+    grade, reasons = quality.evidence_grade(res, 73)
+    assert grade == "C" and any("1 of 3" in r for r in reasons)

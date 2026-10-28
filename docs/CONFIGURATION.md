@@ -12,7 +12,7 @@ Settings come from environment variables, optionally loaded from `.env` in the p
 | `LLM_MODEL` | `qwen2.5:7b-instruct` | Model name as the server knows it |
 | `LLM_API_KEY` | `ollama` | Bearer token; local servers ignore it |
 | `LLM_TEMPERATURE` | `0.2` | Low is better for structured output |
-| `LLM_TIMEOUT` | `180` | Seconds per model call |
+| `LLM_TIMEOUT` | `600` | Seconds per model call (a 14B model on a laptop needs minutes for long prompts) |
 | `MAX_TOOL_CALLS` | `6` | Tool calls per agent |
 | `MAX_WORKERS` | `4` | Agents running in parallel |
 | `CRITIC_ROUNDS` | `1` | Review-and-redo rounds; `0` disables the critic loop |
