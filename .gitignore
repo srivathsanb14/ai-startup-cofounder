@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.cache/
+outputs/
+.env
+.pytest_cache/
+
+.env.bak
+.ollama-serve.log
+*.pyc
