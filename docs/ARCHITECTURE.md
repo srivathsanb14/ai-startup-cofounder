@@ -70,7 +70,7 @@ access goes through `Http.get` with a 24-hour disk cache and an offline switch.
 
 | Tool | Backend | Best for |
 |---|---|---|
-| `web_search` | Brave API, then SearXNG, then DuckDuckGo HTML | competitors, pricing |
+| `web_search` | Brave API, then SearXNG, then `ddgs`, then DuckDuckGo HTML | competitors, pricing |
 | `news_search` | Google News RSS | trends, funding, launches |
 | `wikipedia` | MediaWiki API | background |
 | `hn_search` | Hacker News (Algolia) | pain points, feasibility |

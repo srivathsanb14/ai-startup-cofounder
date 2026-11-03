@@ -5,6 +5,6 @@ outputs/
 .env
 .pytest_cache/
 
-.env.bak
+.env.bak*
 .ollama-serve.log
 *.pyc

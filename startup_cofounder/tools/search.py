@@ -33,12 +33,25 @@ def _searxng(query: str, base: str) -> ToolResult:
     return ToolResult(sources=sources, text="" if sources else "no results")
 
 
+def _ddgs(query: str) -> ToolResult:
+    """DuckDuckGo through the `ddgs` library (no API key). Skipped when the package is not installed."""
+    from ddgs import DDGS  # ImportError is handled by the caller
+
+    def fetch():
+        return [{"title": _clean(r.get("title", ""), 150), "url": r.get("href", ""), "snippet": _clean(r.get("body", ""))}
+                for r in DDGS(timeout=12).text(query, max_results=8) or []]
+
+    sources = Http.cached_call("ddgs:" + query, fetch)
+    return ToolResult(sources=sources, text="" if sources else "no results")
+
+
 def web_search(query: str) -> ToolResult:
-    """Provider order: Brave (BRAVE_API_KEY), SearXNG (SEARXNG_URL), then DuckDuckGo HTML."""
+    """Provider order: Brave (BRAVE_API_KEY), SearXNG (SEARXNG_URL), ddgs library, then DuckDuckGo HTML."""
     brave_key = os.environ.get("BRAVE_API_KEY", "").strip()
     searx = os.environ.get("SEARXNG_URL", "").strip()
     for provider in ((lambda: _brave(query, brave_key)) if brave_key else None,
-                     (lambda: _searxng(query, searx)) if searx else None):
+                     (lambda: _searxng(query, searx)) if searx else None,
+                     lambda: _ddgs(query)):
         if provider is None:
             continue
         try:

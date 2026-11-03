@@ -97,7 +97,41 @@ def test_web_search_provider_order(monkeypatch):
     assert search.web_search("q").sources[0]["title"] == "S"
 
     monkeypatch.delenv("SEARXNG_URL")
-    assert search.web_search("q").text == "no results"  # DuckDuckGo fallback
+    monkeypatch.setattr(search, "_ddgs", lambda q: (_ for _ in ()).throw(ImportError("ddgs not installed")))
+    assert search.web_search("q").text == "no results"  # DuckDuckGo HTML fallback
+
+
+def test_ddgs_provider_is_used_cached_and_respects_offline(monkeypatch, tmp_path):
+    import sys
+    import types
+    from startup_cofounder.tools import search
+    from startup_cofounder.tools.base import Http, OfflineError
+
+    calls = []
+
+    class FakeDDGS:
+        def __init__(self, timeout=None):
+            pass
+
+        def text(self, query, max_results=8):
+            calls.append(query)
+            return [{"title": "Uber alternatives", "href": "http://x/u", "body": "Lyft, Bolt and Grab compete."}]
+
+    monkeypatch.setitem(sys.modules, "ddgs", types.SimpleNamespace(DDGS=FakeDDGS))
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    monkeypatch.delenv("SEARXNG_URL", raising=False)
+    Http.configure(tmp_path / "http", offline=False)
+    try:
+        first = search.web_search("uber competitors")
+        assert first.sources[0]["url"] == "http://x/u" and "Lyft" in first.sources[0]["snippet"]
+        search.web_search("uber competitors")
+        assert calls == ["uber competitors"]  # second call served from the disk cache
+        Http.configure(tmp_path / "http", offline=True)
+        assert search.web_search("uber competitors").sources  # cached results still work offline
+        with pytest.raises(OfflineError):
+            search.web_search("never seen before")
+    finally:
+        Http.configure(None, offline=False)
 
 
 def test_unit_economics_scenarios_sensitivity():

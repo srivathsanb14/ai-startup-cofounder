@@ -28,6 +28,7 @@ def main(argv=None) -> int:
     parser.add_argument("--fresh", action="store_true", help="ignore checkpoints from an interrupted run of the same idea")
     parser.add_argument("--fast-model", help="smaller model for extraction steps (override LLM_FAST_MODEL)")
     parser.add_argument("--rounds", type=int, help="critic review rounds (0 disables), default CRITIC_ROUNDS")
+    parser.add_argument("--quick", action="store_true", help="faster, thinner run: no extra specialists, no critic review")
     parser.add_argument("--model", help="override LLM_MODEL")
     parser.add_argument("--base-url", help="override LLM_BASE_URL")
     parser.add_argument("--out", help="markdown output path (default outputs/<slug>.md)")
@@ -35,7 +36,8 @@ def main(argv=None) -> int:
 
     config = Config.from_env(
         backend="mock" if args.mock else None, offline=True if args.offline else None,
-        model=args.model, fast_model=args.fast_model, base_url=args.base_url, critic_rounds=args.rounds)
+        model=args.model, fast_model=args.fast_model, base_url=args.base_url, critic_rounds=0 if args.quick and args.rounds is None else args.rounds,
+        max_extra_specialists=0 if args.quick else None)
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Researching: %s" % args.idea, file=sys.stderr)

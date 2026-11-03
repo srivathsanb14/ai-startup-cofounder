@@ -74,3 +74,27 @@ def test_real_world_mostly_estimates_with_one_competitor_is_not_graded_b():
     res = {"competitor": _result("competitor", {"competitors": [{"verified": True}]}, findings)}
     grade, reasons = quality.evidence_grade(res, 73)
     assert grade == "C" and any("1 of 3" in r for r in reasons)
+
+
+def test_valid_company_name_rejects_ids_titles_and_sentences():
+    from startup_cofounder.quality import valid_company_name
+    for bad in ("E16", "[E40]", "Best Ride-Hailing Apps in Egypt in 2026", "Ride-sharing apps are good, actually",
+                "Top 10 alternatives to Uber", "How does Lyft work?", ""):
+        assert not valid_company_name(bad), bad
+    for good in ("Uber", "Lyft", "inDrive", "Bank of America", "Grab Holdings", "Competitor A (mock)"):
+        assert valid_company_name(good), good
+
+
+def test_invalid_names_are_not_ranked_or_verified():
+    from startup_cofounder import competitors
+    from startup_cofounder.evidence import EvidenceLedger
+    from startup_cofounder.agents import AgentResult
+    from startup_cofounder.quality import verify_competitors
+    corpus = "Best Ride-Hailing Apps in Egypt in 2026 lyft lyft uber E16"
+    raw = [{"name": "E16"}, {"name": "Best Ride-Hailing Apps in Egypt in 2026"}, {"name": "Lyft"}, {"name": "Uber"}]
+    assert competitors.rank_candidates(raw, corpus) == ["Lyft", "Uber"]
+    ledger = EvidenceLedger()
+    ledger.add("web_search", [{"title": "Best Ride-Hailing Apps in Egypt in 2026 lyft", "url": "http://x/1", "snippet": "uber"}])
+    res = AgentResult("competitor", {"competitors": [{"name": "E16"}, {"name": "Lyft"}, {"name": "Zzyzx"}]}, [])
+    verify_competitors(res, ledger)
+    assert [(c["name"], c["verified"]) for c in res.output["competitors"]] == [("Lyft", True), ("Zzyzx", False)]

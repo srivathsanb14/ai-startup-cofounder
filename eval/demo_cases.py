@@ -63,10 +63,12 @@ def main():
     parser.add_argument("--mock", action="store_true")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--rounds", type=int, help="critic rounds")
+    parser.add_argument("--quick", action="store_true", help="no extra specialists, no critic review")
     parser.add_argument("--only", help="substring filter on case name or idea")
     args = parser.parse_args()
     config = Config.from_env(backend="mock" if args.mock else None, offline=True if args.offline else None,
-                             critic_rounds=args.rounds)
+                             critic_rounds=0 if args.quick and args.rounds is None else args.rounds,
+                             max_extra_specialists=0 if args.quick else None)
     config.output_dir.mkdir(exist_ok=True)
     rows = []
     for case in CASES:

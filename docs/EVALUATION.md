@@ -25,7 +25,7 @@ The harness always runs with `fresh=True` so results never come from a checkpoin
 
 ## Running without a search provider
 
-If you have no Brave key or SearXNG instance, set `DISABLED_TOOLS=web_search` (or use
+Web search runs through the keyless `ddgs` library by default. If it is blocked on your network, set `DISABLED_TOOLS=web_search` (or use
 `scripts/setup_ollama.sh --disable-web-search`). The pipeline then relies on news, Wikipedia, Hacker News and page fetch.
 Expect lower `competitor_recall` and `sources`; record this setting alongside your results so runs are comparable.
 

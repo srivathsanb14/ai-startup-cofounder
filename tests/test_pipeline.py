@@ -352,3 +352,46 @@ def test_guardrail_downgrades_unsupported_go(tmp_path):
     result = Pipeline(_config(tmp_path, offline=True), llm=OptimisticLLM()).run("A tool for freelancers to invoice clients")
     assert result.synthesis["verdict"] == "go"
     assert result.verdict == "validate_first" and "guardrail" in result.verdict_note
+
+
+class TitleThenNames(MockLLM):
+    """First candidate call returns only article titles (all invalid); the retry returns real names."""
+
+    def __init__(self):
+        self.candidate_calls = 0
+
+    def chat(self, messages, temperature=None, json_mode=False, schema=None):
+        if messages[0]["content"].startswith("ROLE: candidates"):
+            self.candidate_calls += 1
+            names = ["Best Ride-Hailing Apps in 2026", "E16"] if self.candidate_calls == 1 else [
+                "Zoomly", "Meetio", "Callrix"]
+            return json.dumps({"candidates": [{"name": n} for n in names]})
+        return super().chat(messages, temperature, json_mode, schema)
+
+
+def test_candidate_retry_recovers_after_invalid_names(tmp_path, stub_web):
+    llm = TitleThenNames()
+    result = Pipeline(_config(tmp_path, critic_rounds=0), llm=llm).run(IDEA)
+    assert llm.candidate_calls >= 2
+    assert [c["name"] for c in result.results["competitor"].output["competitors"]][:3] == ["Zoomly", "Meetio", "Callrix"]
+
+
+def test_no_competitors_means_no_invented_summary(tmp_path):
+    class NoNames(MockLLM):
+        def chat(self, messages, temperature=None, json_mode=False, schema=None):
+            if messages[0]["content"].startswith("ROLE: candidates"):
+                return json.dumps({"candidates": []})
+            return super().chat(messages, temperature, json_mode, schema)
+
+    result = Pipeline(_config(tmp_path, offline=True, critic_rounds=0), llm=NoNames()).run(IDEA)
+    out = result.results["competitor"].output
+    assert out["competitors"] == [] and "No competitors could be confirmed" in out["summary"]
+
+
+def test_quick_flag_skips_specialists_and_review(tmp_path):
+    from startup_cofounder.cli import main
+    out = tmp_path / "r.md"
+    assert main(["--mock", "--offline", "--fresh", "--quick", "--out", str(out), "An app for matching farms with chefs"]) == 0
+    data = json.loads(out.with_suffix(".json").read_text())
+    assert "regulatory" not in data["agents"]
+    assert data["review_log"] == []

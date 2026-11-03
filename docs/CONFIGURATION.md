@@ -56,7 +56,9 @@ Other servers: vLLM (`--served-model-name`), llama.cpp (`llama-server`), LM Stud
 1. **Brave** if `BRAVE_API_KEY` is set (reliable; free tier available).
 2. **SearXNG** if `SEARXNG_URL` is set. Your instance must allow JSON: in `settings.yml`, under
    `search: formats:` include `json`.
-3. **DuckDuckGo HTML**: keyless, but may be blocked or return no results. When blocked, the tool reports it,
+3. **`ddgs` library** (DuckDuckGo, keyless, installed by `requirements.txt`). Results are cached on disk for 24 hours
+   like every other tool. Skipped if the package is missing; it can be rate-limited.
+4. **DuckDuckGo HTML scraping**: last resort, usually blocked. When blocked, the tool reports it,
    which then uses `news_search`, `wikipedia` or `hn_search`.
 
 `news_search`, `wikipedia`, `hn_search` and page fetching need no keys.
@@ -79,7 +81,7 @@ process), run the same command again and it resumes. The key covers the idea, ba
 
 Rough model calls per run with defaults: coordinator 1, sections 3 + extras, competitors about 6 (names, up to 4
 profiles, summary), critic 1, up to 3 redos, financial 1, synthesizer 1: about 15-20 calls, each with a short prompt
-(retrieval is not an LLM call). To go faster use `--rounds 0` or
+(retrieval is not an LLM call). To go faster use `--quick` (or `--rounds 0`), a small `LLM_FAST_MODEL` such as `qwen2.5:7b-instruct`, or
 `MAX_EXTRA_SPECIALISTS=0`.
 
 ## Troubleshooting
@@ -91,7 +93,7 @@ profiles, summary), critic 1, up to 3 redos, financial 1, synthesizer 1: about 1
 | Rerun returns instantly with old results | It resumed a completed run; use `--fresh` for new research |
 | Evidence grade D, "every finding is an estimate" | Offline mode, no network, or search blocked: set a search provider or check connectivity |
 | Many "downgraded" claims in Evidence quality | Normal with small models; they paraphrase numbers. Try a bigger model |
-| `web_search` says blocked | DuckDuckGo bot check: set `BRAVE_API_KEY` or `SEARXNG_URL` |
+| `web_search` says blocked or returns nothing | Free search was rate-limited or blocked: wait, or set `BRAVE_API_KEY` or `SEARXNG_URL` |
 | SearXNG returns nothing | JSON format not enabled in its `settings.yml` |
 | Stale results | Delete `.cache/` (24h cache) |
 | `.env` value ignored | A real environment variable of the same name takes priority; inline comments must be preceded by a space then `#` |

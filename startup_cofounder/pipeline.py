@@ -241,6 +241,33 @@ class Pipeline:
         out["verified"] = quality.name_seen(name, r.ledger.corpus())
         return out
 
+    def _candidate_names(self, r: _Run, tried: List[str]):
+        """Valid, evidence-backed competitor names. A second, snippets-only attempt runs when the first finds fewer than 3."""
+        question = "companies products competitors alternatives %s" % r.category
+        names: List[str] = []
+        ids: List[str] = []
+        raw_seen: List[str] = []
+        for attempt, (n_snip, n_pass) in enumerate(((14, 6), (30, 0))):
+            pack, pack_ids = retrieval.evidence_pack(question, r.ids.get("competitor", []), r.ledger, r.index,
+                                                     n_snippets=n_snip, n_passages=n_pass)
+            ids += [i for i in pack_ids if i not in ids]
+            ask = ("List the companies or products that compete in this category (%s). Use names exactly as they appear "
+                   "in the evidence. Names of companies or products only: never article titles, sentences or evidence ids "
+                   "like E12." % r.category)
+            if attempt:
+                ask += " Return at least 5 distinct names."
+            raw, _ = self.ex_fast.run("candidates", system_prompt(
+                "candidates", "You extract competitor names from search evidence.", CANDIDATE_SCHEMA),
+                "IDEA: %s\nTASK: %s\n\nEVIDENCE:\n%s" % (r.focus, ask, pack), schemas.CANDIDATES)
+            found = (raw or {}).get("candidates")
+            raw_seen += [str(c.get("name")) for c in found or [] if isinstance(c, dict)]
+            for n in comp.rank_candidates(found, r.ledger.corpus(), skip=list(tried) + names,
+                                          allow_unseen=not r.ledger.all()):
+                names.append(n)
+            if len(names) >= 3:
+                break
+        return names, ids, raw_seen
+
     def _competitors(self, r: _Run, prior: Optional[dict] = None, feedback: Optional[str] = None) -> dict:
         self._emit("competitor", "start")
         if prior is not None or feedback:  # redo: widen the search first
@@ -252,14 +279,7 @@ class Pipeline:
         have = list((prior or {}).get("competitors", []))
         tried = list((prior or {}).get("__tried__", [])) + [c.get("name", "") for c in have]
 
-        pack, ids = retrieval.evidence_pack("companies products competitors alternatives %s" % r.category,
-                                            r.ids.get("competitor", []), r.ledger, r.index, n_snippets=14, n_passages=6)
-        user = ("IDEA: %s\nTASK: List the companies or products that compete in this category (%s). Use names exactly as "
-                "they appear in the evidence.\n\nEVIDENCE:\n%s" % (r.focus, r.category, pack))
-        raw, _ = self.ex_fast.run("candidates", system_prompt(
-            "candidates", "You extract competitor names from search evidence.", CANDIDATE_SCHEMA), user, schemas.CANDIDATES)
-        names = comp.rank_candidates((raw or {}).get("candidates"), r.ledger.corpus(), skip=tried,
-                                     allow_unseen=not r.ledger.all())
+        names, ids, seen_raw = self._candidate_names(r, tried)
         top = names[: (4 if not have else max(2, 4 - len(have)))]
         with ThreadPoolExecutor(max_workers=max(1, self.config.max_workers)) as pool:
             profiles = [p for p in pool.map(lambda n: self._profile(r, n), top) if p]
@@ -270,13 +290,16 @@ class Pipeline:
         comps = comp.merge_competitors(have, profiles)
         brief = json.dumps([{k: c.get(k) for k in ("name", "description", "pricing", "strengths", "weaknesses")}
                             for c in comps[:4]], ensure_ascii=False)[:3500]
-        summ, _ = self.ex.run("competitor_summary", system_prompt(
-            "competitor_summary", "You summarize the competitive landscape for a founder.", SUMMARY_SCHEMA, grounded=False),
-            "IDEA: %s\nPROFILES:\n%s" % (r.focus, brief), schemas.COMPETITOR_SUMMARY)
+        if comps:
+            summ, _ = self.ex.run("competitor_summary", system_prompt(
+                "competitor_summary", "You summarize the competitive landscape for a founder.", SUMMARY_SCHEMA, grounded=False),
+                "IDEA: %s\nPROFILES:\n%s" % (r.focus, brief), schemas.COMPETITOR_SUMMARY)
+        else:  # nothing to summarize; a model asked anyway would invent players from memory
+            summ = {"summary": "No competitors could be confirmed in the retrieved evidence.", "white_space": ""}
         summ = summ or {}
         self._emit("competitor", "done", "%d profiled" % len(comps))
         return {"summary": summ.get("summary", ""), "competitors": comps, "white_space": summ.get("white_space", ""),
-                "findings": findings, "__evidence__": ids, "__tried__": tried + top}
+                "findings": findings, "__evidence__": ids, "__tried__": tried + top, "__candidates__": seen_raw}
 
     def _result(self, r: _Run, role: str, raw: Optional[dict]) -> AgentResult:
         if not raw or "__error__" in raw:
@@ -284,6 +307,7 @@ class Pipeline:
         out = copy.deepcopy(raw)
         ids = out.pop("__evidence__", [])
         out.pop("__tried__", None)
+        out.pop("__candidates__", None)
         findings = normalize_findings(out.get("findings"), r.ledger)
         out["findings"] = [f.to_dict() for f in findings]
         return AgentResult(role, out, findings, [{"tool": "retrieval", "source_ids": ids}])

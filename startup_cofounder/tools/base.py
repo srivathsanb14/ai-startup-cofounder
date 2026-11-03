@@ -57,6 +57,20 @@ class Http:
             cls.cache_dir.mkdir(parents=True, exist_ok=True)
 
     @classmethod
+    def cached_call(cls, key: str, fn):
+        """Run fn() -> JSON-serializable and cache its result like an HTTP GET (same TTL, offline switch)."""
+        digest = hashlib.sha256(key.encode()).hexdigest()
+        cached = cls.cache_dir / (digest + ".json") if cls.cache_dir else None
+        if cached is not None and cached.exists() and time.time() - cached.stat().st_mtime < cls.ttl_seconds:
+            return json.loads(cached.read_text())
+        if cls.offline:
+            raise OfflineError()
+        value = fn()
+        if cached is not None and value:
+            cached.write_text(json.dumps(value))
+        return value
+
+    @classmethod
     def get(cls, url: str, params: Optional[dict] = None, timeout: int = 12,
             headers: Optional[dict] = None) -> str:
         """headers are sent but deliberately excluded from the cache key (they may hold API keys)."""

@@ -84,10 +84,10 @@ It verifies the macOS app's code signature before installing, never overwrites a
 to re-run. Prefer to do it by hand? Install Ollama from https://ollama.com, run `ollama pull qwen2.5:14b-instruct`
 and `cp .env.example .env`.
 
-**3. (Recommended) Add a search provider.** Free DuckDuckGo scraping is unreliable and may be blocked.
-Put one of these in `.env`. With none, run `scripts/setup_ollama.sh --disable-web-search` (or set
-`DISABLED_TOOLS=web_search`) so the pipeline doesn't waste calls on a blocked search and uses news, Wikipedia,
-Hacker News and page fetch instead (competitor recall will be lower).
+**3. (Optional) Add a search provider.** Web search works out of the box through the keyless `ddgs` library
+(installed by `requirements.txt`), but free search can be rate-limited or blocked. For reliable results put one of
+these in `.env`; they are tried first. If all web search fails, the pipeline falls back to news headlines, Wikipedia
+and Hacker News (competitor recall will be lower). To skip web search entirely, set `DISABLED_TOOLS=web_search`.
 
 ```
 BRAVE_API_KEY=...        # free tier at https://brave.com/search/api/
@@ -134,6 +134,7 @@ python -m startup_cofounder "idea" [options]
   --offline         disable all network tools (every finding becomes an estimate)
   --fresh           ignore checkpoints from an interrupted run of the same idea
   --fast-model NAME smaller model for extraction steps (default: same as --model)
+  --quick           faster, thinner run: no extra specialists and no critic review
   --rounds N        critic review rounds (default 1; 0 disables)
   --model NAME      override LLM_MODEL
   --base-url URL    override LLM_BASE_URL

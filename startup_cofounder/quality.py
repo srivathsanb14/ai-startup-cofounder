@@ -31,10 +31,30 @@ def _clean_name(name: str) -> str:
     return re.sub(r"\s+", " ", re.sub(SUFFIXES, " ", str(name).lower())).strip(" .,-")
 
 
+# Words that mark an article title or sentence rather than a company or product name.
+_TITLE_WORDS = {"best", "top", "guide", "review", "reviews", "alternatives", "alternative", "versus", "vs", "how", "why",
+                "what", "are", "is", "was", "good", "actually", "apps", "list", "compared", "comparison", "ranked",
+                "your", "you", "our", "this", "that", "news", "market", "industry", "report", "pricing"}
+
+
+def valid_company_name(name: str) -> bool:
+    """False for evidence ids, sentences and article titles that a model sometimes returns as a 'name'."""
+    name = (name or "").strip()
+    if not name or len(name) > 40 or re.fullmatch(r"\[?E\d+\]?", name, flags=re.I):
+        return False
+    name = re.sub(r",\s*(inc|llc|ltd|corp|co|gmbh|plc)\.?$", "", name, flags=re.I)  # "Zoom Video, Inc."
+    if re.search(r"\b(19|20)\d\d\b|[?!:;]|,", name):
+        return False
+    words = re.findall(r"[A-Za-z0-9&'.\-]+", name)
+    if not words or len(words) > 4:
+        return False
+    return not any(w.lower().strip(".-'") in _TITLE_WORDS for w in words)
+
+
 def name_seen(name: str, corpus: str) -> bool:
-    """True if a company/product name (or its distinctive first word) appears in collected evidence."""
+    """True if a plausible company/product name (or its distinctive first word) appears in collected evidence."""
     clean = _clean_name(name)
-    if not clean or not corpus:
+    if not clean or not corpus or not valid_company_name(name):
         return False
     if clean in corpus:
         return True
@@ -47,7 +67,8 @@ def verify_competitors(result, ledger: EvidenceLedger) -> None:
     if result is None or not isinstance(result.output.get("competitors"), list):
         return
     corpus = ledger.corpus()
-    comps = [c for c in result.output["competitors"] if isinstance(c, dict) and c.get("name")]
+    comps = [c for c in result.output["competitors"]
+             if isinstance(c, dict) and valid_company_name(str(c.get("name", "")))]
     for c in comps:
         ids = ledger.valid_ids(c.get("source_ids"))
         c["source_ids"] = ids
