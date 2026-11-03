@@ -125,13 +125,6 @@ def page_text(url: str, limit: int = 30000):
     return _clean(title, 150), _clean(soup.get_text(" "), limit)
 
 
-def fetch_page(url: str) -> ToolResult:
-    if not url.startswith(("http://", "https://")):
-        return ToolResult(text="url must start with http(s)://", error=True)
-    title, body = page_text(url, 2500)
-    return ToolResult(sources=[{"title": title, "url": url, "snippet": body}])
-
-
 ALL_TOOLS = {
     "web_search": Tool("web_search", "general web search; best for competitors, pricing, product pages",
                        {"query": "string"}, web_search),
@@ -141,6 +134,4 @@ ALL_TOOLS = {
                       {"query": "string"}, wikipedia),
     "hn_search": Tool("hn_search", "Hacker News stories; best for customer pain points and technical feasibility",
                       {"query": "string"}, hn_search),
-    "fetch_page": Tool("fetch_page", "download one web page and return its text (use a URL from a prior result)",
-                       {"url": "string"}, fetch_page),
 }

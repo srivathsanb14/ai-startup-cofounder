@@ -1,4 +1,4 @@
-"""One-shot structured extraction: evidence in, schema-valid JSON out. Used by the v2 pipeline."""
+"""One-shot structured extraction: evidence in, schema-valid JSON out."""
 from __future__ import annotations
 
 from datetime import date

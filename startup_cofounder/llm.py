@@ -73,8 +73,8 @@ class OpenAICompatLLM:
 class MockLLM:
     """Deterministic stand-in so the whole pipeline can be demoed and tested without a model.
 
-    Output is generic scaffolding, clearly labelled, never real research. It follows both the v1 tool-calling
-    protocol and the v2 extraction prompts.
+    Output is generic scaffolding, clearly labelled, never real research. It answers the pipeline's extraction
+    prompts and quotes the first retrieved headline so grounding checks pass honestly.
     """
 
     def chat(self, messages: Messages, temperature: Optional[float] = None, json_mode: bool = False,
@@ -84,19 +84,12 @@ class MockLLM:
         first_user = messages[1]["content"]
         idea_match = re.search(r"IDEA: (.+)", first_user)
         idea = idea_match.group(1).strip() if idea_match else "the idea"
-        observed = [m["content"] for m in messages if m["role"] == "user" and m["content"].startswith("TOOL_OBSERVATION")]
 
         if role == "coordinator":
             return json.dumps(self._plan(idea))
         if role == "critic":
             return json.dumps({"approved": True, "gaps": []})
-        offered = re.findall(r"^- (\w+)\(", system, flags=re.M)  # v1 only: tools this agent may actually use
-        if role not in ("financial", "synthesizer") and offered and not observed:
-            tool = "web_search" if "web_search" in offered else offered[0]
-            return json.dumps({"thought": "start with a search", "tool": tool,
-                               "args": {"query": "%s %s" % (idea, role)}})
-        evidence = observed[-1] if observed else first_user
-        hits = re.findall(r"\[(E\d+)\] (.+)", evidence)
+        hits = re.findall(r"\[(E\d+)\] (.+)", first_user)
         cite, title = ([hits[0][0]], hits[0][1].strip()) if hits else ([], "")
         if role == "candidates":
             names = []
@@ -109,7 +102,7 @@ class MockLLM:
         if role == "profile":
             who = re.search(r"CANDIDATE: (.+)", first_user)
             return json.dumps(self._profile(who.group(1).strip() if who else "Unknown", cite, title))
-        return json.dumps({"final": self._final(role, idea, cite, title)})
+        return json.dumps(self._final(role, idea, cite, title))
 
     @staticmethod
     def _plan(idea: str) -> dict:

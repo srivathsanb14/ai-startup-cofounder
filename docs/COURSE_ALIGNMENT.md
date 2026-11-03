@@ -25,19 +25,18 @@
 
 | Proposal statement | Implementation |
 |---|---|
-| Open-source LLMs (Llama/Qwen) with a small tool library | `OpenAICompatLLM` for Ollama/vLLM/llama.cpp; five tools in `tools/search.py` |
+| Open-source LLMs (Llama/Qwen) with a small tool library | `OpenAICompatLLM` for Ollama/vLLM/llama.cpp; four search tools and page fetching in `tools/` |
 | APIs such as Google RSS to scrape news | `news_search` uses Google News RSS; plus Wikipedia, Hacker News and page fetch |
 | transformers, pandas and similar | pandas for the financial model; model inference via an OpenAI-compatible server |
 | Coordinator divides the idea into research tasks | Coordinator agent writes per-agent research questions |
-| "Swarm" of agentic LLMs access the right tools | Parallel researchers with per-agent tool sets; coordinator can add specialists dynamically |
+| "Swarm" of agentic LLMs access the right tools | Parallel specialists over shared retrieved evidence; coordinator can add specialists dynamically |
 | Results ingested by a different agent instance to write a report backed by evidence | Synthesizer agent + evidence ledger + grounding checks |
 | Separate sourced facts from estimates (problem statement) | Fact/estimate labels, machine-checked citations, evidence grade |
 
-## Beyond the proposal (agentic behavior)
+## Beyond the proposal
 
-- **Retrieve-then-extract engine (v2):** deterministic retrieval, full-page evidence, staged competitor discovery, schema-constrained output, optional two-model split and resumable runs, added after the first live evaluation showed the tool-loop design was slow and weak on competitors. The original agentic engine is kept for comparison.
-
-- **Tool loops with autonomy:** each agent chooses queries, reads results, fetches pages and decides when to stop.
+- **Retrieve-then-extract:** deterministic retrieval, full-page evidence, staged competitor discovery, schema-constrained output, optional two-model split and resumable runs.
+- **Parallel specialists:** customer, competitor, market, technical and idea-specific roles each read their own evidence pack concurrently; code, not the model, decides which tools to call.
 - **Critic loop:** automated plus LLM review that sends weak sections back for another pass.
 - **Dynamic planning:** the coordinator can create new specialist agents per idea.
 - **Guardrails:** deterministic verdict cap and sanity checks around LLM judgments.

@@ -1,4 +1,4 @@
-"""Validation harness: run the agent on businesses that already exist and check it
+"""Validation harness: run the pipeline on businesses that already exist and check it
 rediscovers what we know to be true (the proposal's Weeks 9-12 'authenticity' check).
 
     python eval/demo_cases.py                 # configured model + live web tools, all cases
@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from startup_cofounder.config import Config  # noqa: E402
-from startup_cofounder.pipeline_v2 import build_pipeline  # noqa: E402
+from startup_cofounder.pipeline import Pipeline  # noqa: E402
 from startup_cofounder.report import render_markdown  # noqa: E402
 
 CASES = [
@@ -62,23 +62,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mock", action="store_true")
     parser.add_argument("--offline", action="store_true")
-    parser.add_argument("--engine", choices=["v2", "agentic"], help="pipeline to evaluate (default from config)")
     parser.add_argument("--rounds", type=int, help="critic rounds")
     parser.add_argument("--only", help="substring filter on case name or idea")
     args = parser.parse_args()
     config = Config.from_env(backend="mock" if args.mock else None, offline=True if args.offline else None,
-                             engine=args.engine, critic_rounds=args.rounds)
+                             critic_rounds=args.rounds)
     config.output_dir.mkdir(exist_ok=True)
     rows = []
     for case in CASES:
         if args.only and args.only.lower() not in (case["name"] + case["idea"]).lower():
             continue
         print("running:", case["idea"], file=sys.stderr)
-        pipeline = build_pipeline(config)
         started = time.time()
-        assessment = pipeline.run(case["idea"], fresh=True) if config.engine == "v2" else pipeline.run(case["idea"])
+        assessment = Pipeline(config).run(case["idea"], fresh=True)
         minutes = round((time.time() - started) / 60, 1)
-        rows.append({"case": case["name"], "engine": config.engine, "minutes": minutes, **score(assessment, case["known_competitors"])})
+        rows.append({"case": case["name"], "minutes": minutes, **score(assessment, case["known_competitors"])})
         (config.output_dir / ("eval-%s.md" % case["name"])).write_text(render_markdown(assessment))
     (config.output_dir / "eval-results.json").write_text(json.dumps(rows, indent=2))
 

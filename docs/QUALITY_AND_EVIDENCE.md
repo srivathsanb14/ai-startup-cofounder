@@ -6,9 +6,9 @@ guesswork, and how much to trust the whole report. This document describes each 
 ## 1. Evidence ledger (`evidence.py`)
 
 Every search result or fetched page is registered with an id (`E1`, `E2`, ...). Duplicates (same URL) reuse the
-same id. Agents see ids in tool observations and cite them in findings.
+same id. The model sees ids in its evidence pack and cites them in findings.
 
-In the v2 engine, full-page **passages** are also registered as sources (`<url>#p3`, tool `passage`), so a claim is
+Full-page **passages** are also registered as sources (`<url>#p3`, tool `passage`), so a claim is
 checked against the exact ~650-character passage it cites rather than a short search snippet. This is meant to keep
 more true claims as facts than short snippets allow (to be confirmed by the evaluation).
 
@@ -28,7 +28,7 @@ Single-digit numbers are ignored ("3 competitors") because they match too easily
 **What this catches:** fabricated statistics, citations pasted onto unrelated claims, uncited assertions.
 **What it cannot catch:** a claim that reuses the right words and numbers but misreads the source, or a source that
 is itself wrong. It improves honesty; it does not prove truth. Snippets are short, so a true claim from deeper in a
-page can be downgraded; agents are told to `fetch_page` key pages to avoid this.
+page can be downgraded; passages from fully fetched pages reduce this.
 
 ## 3. Competitor verification (`quality.verify_competitors`)
 
@@ -43,7 +43,7 @@ competitor from memory is allowed, but it is visibly marked.
 | Agent | Gap raised when |
 |---|---|
 | any | produced no output or failed |
-| any | sources exist, the agent made tool calls, but none of its findings is a verified fact |
+| any | sources exist but none of its findings is a verified fact |
 | Customer | no segments |
 | Competitor | fewer than 3 competitors, or fewer than 2 of them appear in any evidence |
 | Market | TAM, SAM or SOM missing/non-positive, or no method |
@@ -51,8 +51,7 @@ competitor from memory is allowed, but it is visibly marked.
 
 ### LLM critic
 The Critic agent receives the research and the rule findings and adds only decision-relevant gaps. At most 3
-gaps per round are acted on (one per agent, rules first). In the agentic engine each flagged agent is re-run with its previous answer
-and the feedback; in v2 the section first gets follow-up searches and more pages, then is re-extracted with its previous
+gaps per round are acted on (one per agent, rules first). A flagged section first gets follow-up searches and more pages, then is re-extracted with its previous
 answer and the feedback (competitors also get a wider candidate search), and the new output replaces the old one only if it is valid. The report's **Quality review**
 section lists every redo and whether it improved.
 
@@ -89,6 +88,6 @@ the report warns that its content is placeholder text.
 
 ## Tuning
 
-- More thorough research: `MAX_TOOL_CALLS=8`, `CRITIC_ROUNDS=2` (slower, more model calls).
+- More thorough research: `CRITIC_ROUNDS=2` (slower, more model calls).
 - Faster/cheaper drafts: `CRITIC_ROUNDS=0`, `MAX_EXTRA_SPECIALISTS=0`.
 - Stricter or looser grounding: edit `STOPWORDS` and the overlap threshold in `evidence.grounding_problem`.

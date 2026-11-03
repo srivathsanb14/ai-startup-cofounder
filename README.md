@@ -1,6 +1,6 @@
 # AI Startup Co-Founder
 
-**An evidence-backed startup assessment from a rough business idea, produced by a team of cooperating LLM agents.**
+**An evidence-backed startup assessment from a rough business idea, produced by a team of cooperating LLM roles.**
 
 *Agents of Chaos: AI Agents for Engineers, Fall 2026 (project idea #39).
 Team: Owen Liston, Jacob Barry, Srivathsan Badrinarayanan, Jimmy Wang.*
@@ -20,18 +20,18 @@ experiments to run next. Every claim is labelled **fact** (with a citation you c
 
 | Problem with a plain chat answer | What this project does about it |
 |---|---|
-| Confident claims with no sources | Every search result gets an id (`E1`, `E2`...). Agents must cite ids, and claims are **machine-checked against the cited text**. |
+| Confident claims with no sources | Every search result gets an id (`E1`, `E2`...). Every claim must cite ids, and claims are **machine-checked against the cited text**. |
 | Invented numbers | A "fact" is downgraded to "estimate" if its numbers don't appear in the cited source. |
 | Invented competitors | Names are extracted from search results, ranked by how often they appear in the evidence, profiled with their own searches, and checked again against everything retrieved. |
 | Made-up financial math | The LLM only proposes assumptions. Code computes the model, so it is consistent and reproducible. |
-| Slow, brittle tool-calling loops | Code runs the searches, pages are read in full, output is schema-constrained, and every stage is checkpointed. |
+| Slow, brittle generation | Code runs the searches, pages are read in full, output is schema-constrained, and every stage is checkpointed. |
 | One-shot answer, no self-review | A **critic** (automatic rules + an LLM reviewer) sends weak sections back for another research pass. |
 | Over-optimistic "go!" verdicts | A **guardrail** refuses "go" unless evidence is strong, LTV/CAC >= 3 and the business breaks even. |
 | One fixed template for every idea | The coordinator can **spawn extra specialists** (e.g. regulation, supply chain) when an idea needs them. |
 
 ## How it works
 
-The default **v2 engine retrieves first, then extracts**: code gathers evidence, and the model only reads it and
+The pipeline **retrieves first, then extracts**: code gathers evidence, and the model only reads it and
 answers in a fixed JSON schema. Every stage is checkpointed, so an interrupted run resumes.
 
 ```
@@ -58,8 +58,7 @@ answers in a fixed JSON schema. Every stage is checkpointed, so an interrupted r
  Synthesizer ─► verdict ─► guardrail ─► report.md + report.json               (main model)
 ```
 
-An older **agentic engine** (each agent drives its own tool-calling loop) is kept for comparison:
-`--engine agentic`. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
 
@@ -87,7 +86,7 @@ and `cp .env.example .env`.
 
 **3. (Recommended) Add a search provider.** Free DuckDuckGo scraping is unreliable and may be blocked.
 Put one of these in `.env`. With none, run `scripts/setup_ollama.sh --disable-web-search` (or set
-`DISABLED_TOOLS=web_search`) so agents don't waste calls on a blocked search and use news, Wikipedia,
+`DISABLED_TOOLS=web_search`) so the pipeline doesn't waste calls on a blocked search and uses news, Wikipedia,
 Hacker News and page fetch instead (competitor recall will be lower).
 
 ```
@@ -99,9 +98,9 @@ SEARXNG_URL=http://localhost:8080   # your own SearXNG with the json format enab
 
 ```bash
 python -m startup_cofounder "A subscription service matching small restaurants with local farms"
-# -> outputs/<idea>.md (report) and outputs/<idea>.json (all agent output, traces, sources)
+# -> outputs/<idea>.md (report) and outputs/<idea>.json (all section output, evidence ids, sources)
 
-streamlit run app.py                      # web UI with live agent log, charts and download
+streamlit run app.py                      # web UI with live progress log, charts and download
 ```
 
 **No model handy?** `python -m startup_cofounder --mock --offline "Any idea here"` runs the whole
@@ -133,11 +132,9 @@ not research, and the report says so.
 python -m startup_cofounder "idea" [options]
   --mock            use the placeholder LLM (no model server needed)
   --offline         disable all network tools (every finding becomes an estimate)
-  --engine NAME     v2 (default, retrieve-then-extract) or agentic (tool-calling loops)
   --fresh           ignore checkpoints from an interrupted run of the same idea
   --fast-model NAME smaller model for extraction steps (default: same as --model)
   --rounds N        critic review rounds (default 1; 0 disables)
-  --max-tools N     tool calls per agent in the agentic engine (default 6)
   --model NAME      override LLM_MODEL
   --base-url URL    override LLM_BASE_URL
   --out PATH        write the report here instead of outputs/<idea>.md
@@ -148,25 +145,25 @@ All settings and environment variables: [docs/CONFIGURATION.md](docs/CONFIGURATI
 ## Testing and evaluation
 
 ```bash
-pytest -q                                   # 43 tests, no network or model needed
+pytest -q                                   # 38 tests, no network or model needed
 python eval/demo_cases.py                   # Airbnb/Duolingo/Zoom/Uber-style ideas, live
 python eval/demo_cases.py --only uber       # one case
 ```
 
-The eval checks that the agent rediscovers competitors we know exist, how much of its output is sourced,
-and whether any agent fails. How to read it: [docs/EVALUATION.md](docs/EVALUATION.md).
+The eval checks that the pipeline rediscovers competitors we know exist, how much of its output is sourced,
+and whether any section fails. How to read it: [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | v2 and agentic engines, retrieval, evidence packs, checkpoints, failure handling |
-| [docs/AGENTS.md](docs/AGENTS.md) | Every agent: role, output schema; the v2 extraction roles and the agentic tool-calling protocol |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Pipeline stages, retrieval, evidence packs, checkpoints, failure handling |
+| [docs/AGENTS.md](docs/AGENTS.md) | Every role: purpose and output schema |
 | [docs/QUALITY_AND_EVIDENCE.md](docs/QUALITY_AND_EVIDENCE.md) | Evidence ledger, grounding checks, critic loop, evidence grade, verdict guardrail |
 | [docs/FINANCIAL_MODEL.md](docs/FINANCIAL_MODEL.md) | Every formula, scenario multiplier and sanity check |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Env vars, model choice, search providers, troubleshooting |
 | [docs/EVALUATION.md](docs/EVALUATION.md) | Validation harness, metrics, how to add test cases |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Project layout, adding agents and tools, testing conventions |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Project layout, adding sections and tools, testing conventions |
 | [docs/COURSE_ALIGNMENT.md](docs/COURSE_ALIGNMENT.md) | Mapping to the course proposal, deliverables and milestones |
 
 ## Known limitations

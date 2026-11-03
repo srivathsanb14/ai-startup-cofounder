@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .config import Config
-from .pipeline_v2 import build_pipeline
+from .pipeline import Pipeline
 from .report import render_markdown
 
 
@@ -25,11 +25,9 @@ def main(argv=None) -> int:
     parser.add_argument("idea", help="your business idea, in plain English")
     parser.add_argument("--mock", action="store_true", help="use the placeholder LLM (no model server needed)")
     parser.add_argument("--offline", action="store_true", help="disable network tools")
-    parser.add_argument("--engine", choices=["v2", "agentic"], help="v2 = retrieve-then-extract (default), agentic = tool-calling loops")
     parser.add_argument("--fresh", action="store_true", help="ignore checkpoints from an interrupted run of the same idea")
     parser.add_argument("--fast-model", help="smaller model for extraction steps (override LLM_FAST_MODEL)")
     parser.add_argument("--rounds", type=int, help="critic review rounds (0 disables), default CRITIC_ROUNDS")
-    parser.add_argument("--max-tools", type=int, help="tool calls per agent, default MAX_TOOL_CALLS")
     parser.add_argument("--model", help="override LLM_MODEL")
     parser.add_argument("--base-url", help="override LLM_BASE_URL")
     parser.add_argument("--out", help="markdown output path (default outputs/<slug>.md)")
@@ -37,14 +35,12 @@ def main(argv=None) -> int:
 
     config = Config.from_env(
         backend="mock" if args.mock else None, offline=True if args.offline else None,
-        model=args.model, fast_model=args.fast_model, base_url=args.base_url, critic_rounds=args.rounds,
-        max_tool_calls=args.max_tools, engine=args.engine)
+        model=args.model, fast_model=args.fast_model, base_url=args.base_url, critic_rounds=args.rounds)
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Researching: %s" % args.idea, file=sys.stderr)
     try:
-        pipeline = build_pipeline(config, on_event=_print_event)
-        assessment = pipeline.run(args.idea, fresh=True) if args.fresh and config.engine == "v2" else pipeline.run(args.idea)
+        assessment = Pipeline(config, on_event=_print_event).run(args.idea, fresh=args.fresh)
     except Exception as exc:
         print("error: %s" % exc, file=sys.stderr)
         return 1

@@ -117,9 +117,9 @@ def test_unit_economics_scenarios_sensitivity():
     assert unit_economics({"cac": 0})["cac_payback_months"] == 0.0
 
 
-def test_disabled_tools_are_hidden_from_agents(monkeypatch):
+def test_disabled_tools_are_hidden(monkeypatch):
     from startup_cofounder.tools import get_tools
-    monkeypatch.setenv("DISABLED_TOOLS", "web_search, fetch_page")
-    assert list(get_tools(["web_search", "news_search", "fetch_page", "wikipedia"])) == ["news_search", "wikipedia"]
+    monkeypatch.setenv("DISABLED_TOOLS", "web_search, hn_search")
+    assert list(get_tools(["web_search", "news_search", "hn_search", "wikipedia"])) == ["news_search", "wikipedia"]
     monkeypatch.delenv("DISABLED_TOOLS")
     assert "web_search" in get_tools(["web_search"])

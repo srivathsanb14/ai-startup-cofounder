@@ -5,7 +5,7 @@ import threading
 import streamlit as st
 
 from startup_cofounder.config import Config
-from startup_cofounder.pipeline_v2 import build_pipeline
+from startup_cofounder.pipeline import Pipeline
 from startup_cofounder.report import render_markdown
 
 st.set_page_config(page_title="AI Startup Co-Founder", page_icon="🚀", layout="wide")
@@ -18,8 +18,6 @@ with st.sidebar:
     defaults = Config.from_env()
     mock = st.checkbox("Mock LLM (demo, no model needed)", value=defaults.backend == "mock")
     offline = st.checkbox("Offline (no web tools)", value=defaults.offline)
-    engine = st.selectbox("Engine", ["v2", "agentic"], index=0 if defaults.engine == "v2" else 1,
-                          help="v2 retrieves evidence first (faster, better); agentic lets each agent drive its own tool calls")
     model = st.text_input("Model", defaults.model)
     base_url = st.text_input("LLM base URL", defaults.base_url)
 
@@ -27,13 +25,13 @@ idea = st.text_area("Your idea", height=110,
                     placeholder="e.g. A subscription service that matches small restaurants with local farms for weekly produce")
 
 if st.button("Analyze", type="primary", disabled=len(idea.strip()) < 8):
-    config = Config.from_env(backend="mock" if mock else "openai", offline=offline, model=model, base_url=base_url, engine=engine)
+    config = Config.from_env(backend="mock" if mock else "openai", offline=offline, model=model, base_url=base_url)
     events: "queue.Queue[dict]" = queue.Queue()
     box = {}
 
     def work():
         try:
-            box["result"] = build_pipeline(config, on_event=events.put).run(idea)
+            box["result"] = Pipeline(config, on_event=events.put).run(idea)
         except Exception as exc:  # surfaced in the UI below
             box["error"] = exc
 

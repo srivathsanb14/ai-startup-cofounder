@@ -6,7 +6,7 @@ from .search import ALL_TOOLS
 
 
 def disabled_tools() -> set:
-    """Tools switched off via DISABLED_TOOLS=web_search,fetch_page (comma separated)."""
+    """Tools switched off via DISABLED_TOOLS=web_search,news_search (comma separated)."""
     return {t.strip() for t in os.environ.get("DISABLED_TOOLS", "").split(",") if t.strip()}
 
 

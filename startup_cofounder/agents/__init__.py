@@ -1,4 +1,4 @@
-from .base import Agent, AgentResult, AgentSpec
+from .base import AgentResult, AgentSpec
 from . import specs
 
-__all__ = ["Agent", "AgentResult", "AgentSpec", "specs"]
+__all__ = ["AgentResult", "AgentSpec", "specs"]

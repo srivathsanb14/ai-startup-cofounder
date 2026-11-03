@@ -32,10 +32,6 @@ class Tool:
     args: Dict[str, str]
     fn: Callable[..., ToolResult]
 
-    def signature(self) -> str:
-        arglist = ", ".join("%s: %s" % (k, v) for k, v in self.args.items())
-        return "- %s(%s): %s" % (self.name, arglist, self.description)
-
     def run(self, **kwargs) -> ToolResult:
         try:
             clean = {k: kwargs[k] for k in self.args if k in kwargs}
