@@ -395,3 +395,18 @@ def test_quick_flag_skips_specialists_and_review(tmp_path):
     data = json.loads(out.with_suffix(".json").read_text())
     assert "regulatory" not in data["agents"]
     assert data["review_log"] == []
+
+
+def test_profile_marked_not_competitor_is_dropped(tmp_path, stub_web):
+    class Picky(MockLLM):
+        def chat(self, messages, temperature=None, json_mode=False, schema=None):
+            out = super().chat(messages, temperature, json_mode, schema)
+            if messages[0]["content"].startswith("ROLE: profile") and "CANDIDATE: Meetio" in messages[1]["content"]:
+                data = json.loads(out)
+                data["is_competitor"] = False
+                return json.dumps(data)
+            return out
+
+    result = Pipeline(_config(tmp_path, critic_rounds=0), llm=Picky()).run(IDEA)
+    names = [c["name"] for c in result.results["competitor"].output["competitors"]]
+    assert "Meetio" not in names and names

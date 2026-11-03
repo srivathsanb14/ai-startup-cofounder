@@ -77,7 +77,7 @@ The grade is passed to the synthesizer so its language matches reality, and show
 ## 6. Verdict guardrail (`quality.cap_verdict`)
 
 The synthesizer may output `go`, `validate_first`, `pivot` or `no_go`. A `go` is **downgraded to
-`validate_first`** unless **all** hold: evidence grade is A or B; LTV/CAC >= 3; operating break-even occurs
+`validate_first`** unless **all** hold: evidence grade is A or B; at least 40% of findings are sourced facts; LTV/CAC >= 3; operating break-even occurs
 within 5 years. Invalid or missing verdicts become `validate_first`. The report prints the reason when a downgrade
 happens. `pivot` and `no_go` are never upgraded.
 

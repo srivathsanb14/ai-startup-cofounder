@@ -98,3 +98,21 @@ def test_invalid_names_are_not_ranked_or_verified():
     res = AgentResult("competitor", {"competitors": [{"name": "E16"}, {"name": "Lyft"}, {"name": "Zzyzx"}]}, [])
     verify_competitors(res, ledger)
     assert [(c["name"], c["verified"]) for c in res.output["competitors"]] == [("Lyft", True), ("Zzyzx", False)]
+
+
+def test_go_needs_enough_sourced_facts():
+    ue_good = {"ltv_cac": 5}
+    verdict, note = quality.cap_verdict("go", "B", ue_good, 3, facts=0.17)
+    assert verdict == "validate_first" and "17%" in note and "sourced facts" in note
+    assert quality.cap_verdict("go", "B", ue_good, 3, facts=0.5) == ("go", "")
+    assert quality.cap_verdict("go", "B", ue_good, 3) == ("go", "")  # facts unknown: other checks decide
+
+
+def test_candidates_rank_by_breadth_across_sources():
+    from startup_cofounder import competitors
+    docs = ["nichecab nichecab nichecab nichecab local ride app", "bigride is popular", "bigride vs others",
+            "review of bigride", "nichecab again"]
+    corpus = " ".join(docs)
+    raw = [{"name": "NicheCab"}, {"name": "BigRide"}]
+    assert competitors.rank_candidates(raw, corpus) == ["NicheCab", "BigRide"]            # raw mention count
+    assert competitors.rank_candidates(raw, corpus, docs=docs) == ["BigRide", "NicheCab"]  # distinct sources

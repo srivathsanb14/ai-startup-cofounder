@@ -15,23 +15,39 @@ GENERIC = {"google", "facebook", "meta", "amazon", "microsoft", "apple", "linked
            "youtube", "wikipedia", "forbes", "crunchbase"}  # appear everywhere; rarely the competitor itself
 
 
-def mention_count(name: str, corpus: str) -> int:
+def _token(name: str, corpus: str) -> str:
     clean = _clean_name(name)
     if not clean:
-        return 0
+        return ""
     token = clean if clean in corpus else clean.split()[0]
-    if len(token) < 4:
+    return token if len(token) >= 4 else ""
+
+
+def mention_count(name: str, corpus: str) -> int:
+    token = _token(name, corpus)
+    return len(re.findall(r"\b%s\b" % re.escape(token), corpus)) if token else 0
+
+
+def source_breadth(name: str, corpus: str, docs: Sequence[str]) -> int:
+    """In how many distinct sources the name appears. A name repeated inside one niche article scores 1."""
+    token = _token(name, corpus)
+    if not token:
         return 0
-    return len(re.findall(r"\b%s\b" % re.escape(token), corpus))
+    pattern = re.compile(r"\b%s\b" % re.escape(token))
+    return sum(1 for d in docs if pattern.search(d))
 
 
-def rank_candidates(raw: Iterable, corpus: str, skip: Iterable[str] = (), allow_unseen: bool = False) -> List[str]:
-    """Distinct candidate names ordered by how often they appear in the evidence.
+def rank_candidates(raw: Iterable, corpus: str, skip: Iterable[str] = (), allow_unseen: bool = False,
+                    docs: Sequence[str] = ()) -> List[str]:
+    """Distinct candidate names, widely mentioned first.
+
+    With `docs` (one text per source) names are ordered by how many distinct sources mention them, then by total
+    mentions, so well-known players beat a name that is only frequent inside one niche article.
 
     Names never seen in the evidence are dropped (model hallucinations) unless there is no evidence at all.
     """
     skip_clean = {_clean_name(s) for s in skip}
-    best: Dict[str, Tuple[str, int, int]] = {}  # clean -> (display, count, first position)
+    best: Dict[str, Tuple[str, int, int, int]] = {}  # clean -> (display, breadth, count, first position)
     for pos, item in enumerate(raw or []):
         name = (item.get("name") if isinstance(item, dict) else str(item)).strip() if item else ""
         clean = _clean_name(name)
@@ -39,9 +55,10 @@ def rank_candidates(raw: Iterable, corpus: str, skip: Iterable[str] = (), allow_
             continue
         if corpus and not name_seen(name, corpus) and not allow_unseen:
             continue
-        best[clean] = (name, mention_count(name, corpus), pos)
-    ordered = sorted(best.values(), key=lambda v: (-v[1], v[2]))
-    return [display for display, _, _ in ordered]
+        count = mention_count(name, corpus)
+        best[clean] = (name, source_breadth(name, corpus, docs) if docs else count, count, pos)
+    ordered = sorted(best.values(), key=lambda v: (-v[1], -v[2], v[3]))
+    return [v[0] for v in ordered]
 
 
 def profile_queries(name: str, category: str) -> List[Tuple[str, str]]:

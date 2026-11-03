@@ -31,7 +31,7 @@ COORDINATOR = obj({
 CANDIDATES = obj({"candidates": arr(obj({"name": STR, "what_it_is": STR}, ["name"]))}, ["candidates"])
 
 PROFILE = obj({
-    "name": STR, "url": STR, "description": STR, "pricing": STR, "strengths": STRS, "weaknesses": STRS,
+    "name": STR, "is_competitor": {"type": "boolean"}, "url": STR, "description": STR, "pricing": STR, "strengths": STRS, "weaknesses": STRS,
     "source_ids": STRS, "findings": FINDINGS,
 }, ["name", "description", "pricing", "strengths", "weaknesses", "source_ids", "findings"])
 

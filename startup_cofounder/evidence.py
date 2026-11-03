@@ -89,6 +89,10 @@ class EvidenceLedger:
         """Lower-cased text of every collected source (used to verify named entities)."""
         return " ".join((s.text + " " + s.url).lower() for s in self.all())
 
+    def documents(self) -> List[str]:
+        """Lower-cased text of each source separately (to count in how many distinct sources a name appears)."""
+        return [(s.text + " " + s.url).lower() for s in self.all()]
+
     def valid_ids(self, ids: Iterable) -> List[str]:
         out: List[str] = []
         for raw in ids or []:

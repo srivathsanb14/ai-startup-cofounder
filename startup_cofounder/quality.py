@@ -136,18 +136,24 @@ def parse_critic(output: dict) -> List[Gap]:
     return gaps
 
 
+MIN_FACT_RATIO_FOR_GO = 0.4  # a "go" needs at least this share of findings to be sourced facts
+
+
+def fact_ratio(results: Dict[str, object]) -> float:
+    findings = [f for r in results.values() for f in r.findings]
+    return sum(f.kind == "fact" for f in findings) / len(findings) if findings else 0.0
+
+
 def evidence_grade(results: Dict[str, object], sources_count: int) -> Tuple[str, List[str]]:
     """A-D grade of how well-supported the research is, with the reasons."""
-    findings = [f for r in results.values() for f in r.findings]
-    facts = sum(f.kind == "fact" for f in findings)
-    fact_ratio = facts / len(findings) if findings else 0.0
+    fact_ratio_ = fact_ratio(results)
     comps = [c for c in (results.get("competitor").output.get("competitors", []) if results.get("competitor") else [])
              if isinstance(c, dict)][:3]
     comp_ratio = sum(bool(c.get("verified")) for c in comps) / 3.0  # the target is three confirmed competitors, so finding one is not full marks
     errors = sum(bool(r.error) for r in results.values())
-    score = 0.5 * fact_ratio + 0.2 * min(sources_count / 15.0, 1.0) + 0.2 * comp_ratio + 0.1 * (errors == 0)
+    score = 0.5 * fact_ratio_ + 0.2 * min(sources_count / 15.0, 1.0) + 0.2 * comp_ratio + 0.1 * (errors == 0)
     grade = "A" if score >= 0.7 else "B" if score >= 0.5 else "C" if score >= 0.3 else "D"
-    reasons = ["%d%% of findings are sourced facts" % round(100 * fact_ratio),
+    reasons = ["%d%% of findings are sourced facts" % round(100 * fact_ratio_),
                "%d sources collected" % sources_count,
                "%d of 3 target competitors confirmed in evidence" % sum(bool(c.get("verified")) for c in comps)]
     if errors:
@@ -155,7 +161,8 @@ def evidence_grade(results: Dict[str, object], sources_count: int) -> Tuple[str,
     return grade, reasons
 
 
-def cap_verdict(verdict: Optional[str], grade: str, ue: dict, breakeven_year: Optional[int]) -> Tuple[str, str]:
+def cap_verdict(verdict: Optional[str], grade: str, ue: dict, breakeven_year: Optional[int],
+                facts: Optional[float] = None) -> Tuple[str, str]:
     """Never let an LLM say 'go' when evidence or economics do not support it."""
     verdict = (verdict or "").lower()
     if verdict not in ("go", "validate_first", "pivot", "no_go"):
@@ -164,6 +171,9 @@ def cap_verdict(verdict: Optional[str], grade: str, ue: dict, breakeven_year: Op
         reasons = []
         if grade not in ("A", "B"):
             reasons.append("evidence grade is %s" % grade)
+        if facts is not None and facts < MIN_FACT_RATIO_FOR_GO:
+            reasons.append("only %d%% of findings are sourced facts (needs >= %d%%)"
+                           % (round(100 * facts), round(100 * MIN_FACT_RATIO_FOR_GO)))
         ratio = ue.get("ltv_cac")
         if ratio is None or ratio < 3:
             reasons.append("LTV/CAC is %s (needs >= 3)" % ("n/a" if ratio is None else "%.1f" % ratio))

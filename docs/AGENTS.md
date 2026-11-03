@@ -26,8 +26,9 @@ literal JSON shape shown to the model. The matching JSON Schemas used for constr
 ### Competitor
 - **Produces:** `summary`, `competitors[{name, url, description, pricing, strengths, weaknesses, source_ids}]`,
   `white_space`, `findings`.
-- **How:** candidates are extracted, ranked by mentions in the evidence, and each top name is searched and profiled
-  separately (`competitors.py`).
+- **How:** candidates are extracted and ranked by how many distinct sources mention them (a name repeated inside one
+  niche article does not outrank a widely mentioned one). Each top name is searched and profiled separately; a
+  profile the model marks `is_competitor: false` is dropped (`competitors.py`).
 - **Post-processing:** `quality.verify_competitors` adds `verified` to each and ranks confirmed ones first;
   the report shows the top three.
 

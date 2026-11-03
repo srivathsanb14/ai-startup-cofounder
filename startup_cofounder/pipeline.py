@@ -44,7 +44,7 @@ RESERVED_ROLES = {"customer", "competitor", "market", "technical", "financial", 
                   "coordinator", "critic", "pipeline", "candidates", "profile"}
 CORE_SECTIONS = ["customer", "competitor", "market", "technical"]
 
-PROFILE_SCHEMA = ('{"name": "", "url": "<official site if in the evidence>", "description": "", "pricing": "", '
+PROFILE_SCHEMA = ('{"name": "", "is_competitor": true, "url": "<official site if in the evidence>", "description": "", "pricing": "", '
                   '"strengths": [""], "weaknesses": [""], "source_ids": ["E1"], '
                   '"findings": [{"claim": "", "kind": "fact|estimate", "source_ids": ["E1"]}]}')
 SUMMARY_SCHEMA = '{"summary": "<3-4 sentences>", "white_space": "<where incumbents are weak>"}'
@@ -94,6 +94,7 @@ class Economics:
     flags: List[str]
     grade: str
     grade_reasons: List[str]
+    fact_ratio: float
     computed: dict  # authoritative numbers handed to the synthesizer
 
 
@@ -110,7 +111,7 @@ def economics(results: Dict[str, AgentResult], fin_output: dict, source_count: i
     computed = {"projection": projection.to_dict(), "unit_economics": ue, "sanity_flags": flags,
                 "scenario_year5_operating_profit": {k: round(float(v.table.iloc[-1]["operating_profit"])) for k, v in scen.items()},
                 "evidence_grade": grade}
-    return Economics(projection, ue, scen, sens, flags, grade, reasons, computed)
+    return Economics(projection, ue, scen, sens, flags, grade, reasons, quality.fact_ratio(results), computed)
 
 
 def _brief(result: AgentResult, limit: int = 2500) -> str:
@@ -231,11 +232,15 @@ class Pipeline:
         pack, _ = retrieval.evidence_pack("%s pricing plans cost per month strengths weaknesses reviews" % name,
                                           ids, r.ledger, r.index, n_snippets=8, n_passages=6)
         user = ("IDEA: %s\nCANDIDATE: %s\nTASK: Profile this competitor: what it does, how it charges, strengths and weaknesses. "
-                "If pricing is not in the evidence write 'not found in sources'.\n\nEVIDENCE:\n%s" % (r.focus, name, pack))
+                "If pricing is not in the evidence write 'not found in sources'. Set is_competitor to false if this is not a company "
+                "or product that sells to the same customers for the same need.\n\nEVIDENCE:\n%s" % (r.focus, name, pack))
         out, _ = self.ex_fast.run("profile", system_prompt(
             "profile", "You are a competitive intelligence analyst profiling one company.", PROFILE_SCHEMA), user, schemas.PROFILE)
         if out is None:
             return None
+        if out.get("is_competitor") is False:
+            return None
+        out.pop("is_competitor", None)
         out["name"] = name
         out["source_ids"] = r.ledger.valid_ids(out.get("source_ids"))
         out["verified"] = quality.name_seen(name, r.ledger.corpus())
@@ -262,7 +267,7 @@ class Pipeline:
             found = (raw or {}).get("candidates")
             raw_seen += [str(c.get("name")) for c in found or [] if isinstance(c, dict)]
             for n in comp.rank_candidates(found, r.ledger.corpus(), skip=list(tried) + names,
-                                          allow_unseen=not r.ledger.all()):
+                                          allow_unseen=not r.ledger.all(), docs=r.ledger.documents()):
                 names.append(n)
             if len(names) >= 3:
                 break
@@ -454,7 +459,7 @@ class Pipeline:
         syn = self._result(r, "synthesizer", r.stage("synthesis", lambda: self._synthesize(r, results, eco.computed)))
         results["synthesizer"] = syn
         verdict, verdict_note = quality.cap_verdict(syn.output.get("verdict"), eco.grade, eco.unit_economics,
-                                                    eco.projection.breakeven_year)
+                                                    eco.projection.breakeven_year, eco.fact_ratio)
         for role, res in results.items():
             if res.error:
                 warnings.append("%s failed: %s" % (role, res.error))
