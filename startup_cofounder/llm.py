@@ -17,29 +17,45 @@ class LLMError(RuntimeError):
 
 
 class OpenAICompatLLM:
-    """Chat client for any OpenAI-compatible endpoint (Ollama, vLLM, llama.cpp, LM Studio)."""
+    """Chat client for any OpenAI-compatible endpoint (Ollama, vLLM, llama.cpp, LM Studio).
 
-    def __init__(self, config: Config) -> None:
+    With `schema`, requests schema-constrained decoding (`response_format: json_schema`). Servers that do not
+    support it are detected by an HTTP 400 and we degrade to plain JSON mode, then to unconstrained output.
+    """
+
+    def __init__(self, config: Config, model: Optional[str] = None) -> None:
         self.config = config
+        self.model = model or config.model
 
-    def chat(self, messages: Messages, temperature: Optional[float] = None, json_mode: bool = False) -> str:
+    def chat(self, messages: Messages, temperature: Optional[float] = None, json_mode: bool = False,
+             schema: Optional[dict] = None) -> str:
         cfg = self.config
         payload = {
-            "model": cfg.model,
+            "model": self.model,
             "messages": messages,
             "temperature": cfg.temperature if temperature is None else temperature,
             "stream": False,
         }
-        if json_mode:
-            payload["response_format"] = {"type": "json_object"}
+        formats = []
+        if schema:
+            formats.append({"type": "json_schema", "json_schema": {"name": "output", "schema": schema}})
+        if json_mode or schema:
+            formats.append({"type": "json_object"})
+        formats.append(None)  # last resort: no constraint
         headers = {"Authorization": "Bearer " + cfg.api_key}
         url = cfg.base_url + "/chat/completions"
         last_err = None
-        for attempt in range(3):
+        attempt = 0
+        while attempt < 3:
+            fmt = formats[0]
+            if fmt:
+                payload["response_format"] = fmt
+            else:
+                payload.pop("response_format", None)
             try:
                 resp = requests.post(url, json=payload, headers=headers, timeout=cfg.timeout)
-                if resp.status_code == 400 and "response_format" in payload:
-                    payload.pop("response_format")  # server does not support JSON mode
+                if resp.status_code == 400 and len(formats) > 1:
+                    formats.pop(0)  # server rejected this format; try the next one without using up a retry
                     continue
                 if resp.status_code >= 500:
                     raise LLMError("server error %d: %s" % (resp.status_code, resp.text[:200]))
@@ -47,7 +63,8 @@ class OpenAICompatLLM:
                 return resp.json()["choices"][0]["message"]["content"] or ""
             except (requests.RequestException, LLMError, KeyError, ValueError) as exc:
                 last_err = exc
-                time.sleep(1.5 * (attempt + 1))
+                attempt += 1
+                time.sleep(1.5 * attempt)
         raise LLMError(
             "LLM call failed (%s). Is your model server running at %s?" % (last_err, cfg.base_url)
         )
@@ -56,12 +73,12 @@ class OpenAICompatLLM:
 class MockLLM:
     """Deterministic stand-in so the whole pipeline can be demoed and tested without a model.
 
-    Output is generic scaffolding, clearly labelled, never real research.
+    Output is generic scaffolding, clearly labelled, never real research. It follows both the v1 tool-calling
+    protocol and the v2 extraction prompts.
     """
 
-    RESEARCH_ROLES = {"customer", "competitor", "market", "technical", "financial"}
-
-    def chat(self, messages: Messages, temperature: Optional[float] = None, json_mode: bool = False) -> str:
+    def chat(self, messages: Messages, temperature: Optional[float] = None, json_mode: bool = False,
+             schema: Optional[dict] = None) -> str:
         system = messages[0]["content"]
         role = re.search(r"ROLE: (\w+)", system).group(1)
         first_user = messages[1]["content"]
@@ -73,22 +90,33 @@ class MockLLM:
             return json.dumps(self._plan(idea))
         if role == "critic":
             return json.dumps({"approved": True, "gaps": []})
-        offered = re.findall(r"^- (\w+)\(", system, flags=re.M)  # tools this agent may actually use
+        offered = re.findall(r"^- (\w+)\(", system, flags=re.M)  # v1 only: tools this agent may actually use
         if role not in ("financial", "synthesizer") and offered and not observed:
             tool = "web_search" if "web_search" in offered else offered[0]
             return json.dumps({"thought": "start with a search", "tool": tool,
                                "args": {"query": "%s %s" % (idea, role)}})
-        cite, title = [], ""
-        if observed:
-            hit = re.search(r"\[(E\d+)\] (.+)", observed[-1])
-            if hit:
-                cite, title = [hit.group(1)], hit.group(2).strip()
+        evidence = observed[-1] if observed else first_user
+        hits = re.findall(r"\[(E\d+)\] (.+)", evidence)
+        cite, title = ([hits[0][0]], hits[0][1].strip()) if hits else ([], "")
+        if role == "candidates":
+            names = []
+            for _, t in hits:
+                word = re.sub(r"[^A-Za-z0-9]", "", t.split()[0]) if t.split() else ""
+                if len(word) >= 4 and word not in names:
+                    names.append(word)
+            names = names[:4] or ["Alpha (mock)", "Beta (mock)", "Gamma (mock)"]
+            return json.dumps({"candidates": [{"name": n, "what_it_is": "[mock]"} for n in names]})
+        if role == "profile":
+            who = re.search(r"CANDIDATE: (.+)", first_user)
+            return json.dumps(self._profile(who.group(1).strip() if who else "Unknown", cite, title))
         return json.dumps({"final": self._final(role, idea, cite, title)})
 
     @staticmethod
     def _plan(idea: str) -> dict:
         return {
             "idea_summary": "[mock] " + idea,
+            "category": "[mock] category",
+            "problem": idea,
             "industry": "unspecified",
             "search_keywords": idea.split()[:4],
             "extra_specialists": [{"role": "regulatory", "focus": "licensing and compliance",
@@ -101,6 +129,13 @@ class MockLLM:
                 "financial": "Estimate costs, revenue and profit over five years.",
             },
         }
+
+    @staticmethod
+    def _profile(name: str, cite: List[str], title: str) -> dict:
+        finding = ([{"claim": "Search result for %s: %s" % (name, title), "kind": "fact", "source_ids": cite}]
+                   if cite else [{"claim": "[mock] placeholder for %s" % name, "kind": "estimate", "source_ids": []}])
+        return {"name": name, "url": "", "description": "[mock] placeholder", "pricing": "unknown",
+                "strengths": ["brand"], "weaknesses": ["generic"], "source_ids": cite, "findings": finding}
 
     @staticmethod
     def _final(role: str, idea: str, cite: List[str], title: str = "") -> dict:
@@ -119,6 +154,8 @@ class MockLLM:
                       "source_ids": cite} for c in "ABC"]
             return {"summary": "[mock] competitor summary", "competitors": comps,
                     "white_space": "[mock] underserved niche", "findings": finding}
+        if role == "competitor_summary":
+            return {"summary": "[mock] competitor summary", "white_space": "[mock] underserved niche"}
         if role == "market":
             return {"summary": "[mock] market summary",
                     "tam_sam_som": {"tam_usd": 5e9, "sam_usd": 5e8, "som_usd": 5e6,
@@ -152,7 +189,8 @@ class MockLLM:
             "future_outlook": "[mock] outlook"}
 
 
-def build_llm(config: Config):
+def build_llm(config: Config, fast: bool = False):
+    """The main model, or (fast=True) the cheaper model for extraction. They are the same unless LLM_FAST_MODEL is set."""
     if config.backend == "mock":
         return MockLLM()
-    return OpenAICompatLLM(config)
+    return OpenAICompatLLM(config, model=(config.fast_model or config.model) if fast else config.model)

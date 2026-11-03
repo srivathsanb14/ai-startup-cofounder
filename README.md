@@ -22,37 +22,44 @@ experiments to run next. Every claim is labelled **fact** (with a citation you c
 |---|---|
 | Confident claims with no sources | Every search result gets an id (`E1`, `E2`...). Agents must cite ids, and claims are **machine-checked against the cited text**. |
 | Invented numbers | A "fact" is downgraded to "estimate" if its numbers don't appear in the cited source. |
-| Invented competitors | Competitor names are checked against everything retrieved; unconfirmed ones are flagged and ranked last. |
+| Invented competitors | Names are extracted from search results, ranked by how often they appear in the evidence, profiled with their own searches, and checked again against everything retrieved. |
 | Made-up financial math | The LLM only proposes assumptions. Code computes the model, so it is consistent and reproducible. |
+| Slow, brittle tool-calling loops | Code runs the searches, pages are read in full, output is schema-constrained, and every stage is checkpointed. |
 | One-shot answer, no self-review | A **critic** (automatic rules + an LLM reviewer) sends weak sections back for another research pass. |
 | Over-optimistic "go!" verdicts | A **guardrail** refuses "go" unless evidence is strong, LTV/CAC >= 3 and the business breaks even. |
 | One fixed template for every idea | The coordinator can **spawn extra specialists** (e.g. regulation, supply chain) when an idea needs them. |
 
 ## How it works
 
+The default **v2 engine retrieves first, then extracts**: code gathers evidence, and the model only reads it and
+answers in a fixed JSON schema. Every stage is checkpointed, so an interrupted run resumes.
+
 ```
-                          rough idea
-                              │
-                        ┌─────▼─────┐
-                        │Coordinator│  sharpens the idea, plans tasks,
-                        └─────┬─────┘  may add 0-2 idea-specific specialists
-        ┌───────────┬─────────┼──────────┬────────────┬ ─ ─ ─ ─ ─ ┐
-   ┌────▼───┐ ┌─────▼────┐ ┌──▼───┐ ┌────▼─────┐ ┌ ─ ─▼─ ─ ─ ┐      parallel, each runs a
-   │Customer│ │Competitor│ │Market│ │Technical │   Extra            tool-using loop
-   └────┬───┘ └─────┬────┘ └──┬───┘ └────┬─────┘ └ ─ ─ ┬ ─ ─ ─ ┘
-        └───────────┴─────────┼──────────┴────────────┴ ─ ─ ─ ─ ─ ┘
-                       ┌──────▼──────┐
-                       │   Critic    │  rule checks + LLM reviewer; redo weak agents
-                       └──────┬──────┘
-                       ┌──────▼──────┐   verify competitor names against evidence
-                       │  Financial  │──► assumptions ─► finance.py (pandas):
-                       └──────┬──────┘   projection, unit economics, scenarios, sensitivity
-                       ┌──────▼──────┐
-                       │ Synthesizer │──► verdict ─► guardrail ─► report.md + report.json
-                       └─────────────┘
+ rough idea
+     │
+     ▼
+ Coordinator ─► category, problem, tasks, optional extra specialists          (fast model)
+     │
+     ▼
+ Retrieval (no LLM): templated searches in parallel ─► top pages fetched in full ─► passages
+     │                                   shared evidence ledger: every source gets an id E1, E2, ...
+     ▼
+ Extraction (parallel, schema-constrained, reads ranked evidence packs)       (fast model)
+   customer │ market │ technical │ extras │ competitors:
+                                            names ─► ranked by evidence ─► each top name searched + profiled
+     │
+     ▼
+ Review: rule checks + critic ─► weak sections get follow-up searches and a redo
+     │
+     ▼
+ Financial assumptions ─► finance.py (pandas): projection, unit economics, scenarios, sensitivity
+     │
+     ▼
+ Synthesizer ─► verdict ─► guardrail ─► report.md + report.json               (main model)
 ```
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+An older **agentic engine** (each agent drives its own tool-calling loop) is kept for comparison:
+`--engine agentic`. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
 
@@ -71,6 +78,7 @@ The setup script installs Ollama, pulls a model, checks that it answers, and poi
 scripts/setup_ollama.sh --dry-run          # prints every step, changes nothing
 scripts/setup_ollama.sh                    # installs, pulls qwen2.5:14b-instruct (~9 GB), asks before each download
 scripts/setup_ollama.sh --model qwen2.5:7b-instruct   # smaller (~5 GB) for tight disks or RAM
+scripts/setup_ollama.sh --fast-model qwen2.5:7b-instruct   # also pull a small model for the extraction steps
 ```
 
 It verifies the macOS app's code signature before installing, never overwrites an existing install, and is safe
@@ -125,8 +133,11 @@ not research, and the report says so.
 python -m startup_cofounder "idea" [options]
   --mock            use the placeholder LLM (no model server needed)
   --offline         disable all network tools (every finding becomes an estimate)
+  --engine NAME     v2 (default, retrieve-then-extract) or agentic (tool-calling loops)
+  --fresh           ignore checkpoints from an interrupted run of the same idea
+  --fast-model NAME smaller model for extraction steps (default: same as --model)
   --rounds N        critic review rounds (default 1; 0 disables)
-  --max-tools N     tool calls per agent (default 6)
+  --max-tools N     tool calls per agent in the agentic engine (default 6)
   --model NAME      override LLM_MODEL
   --base-url URL    override LLM_BASE_URL
   --out PATH        write the report here instead of outputs/<idea>.md
@@ -137,7 +148,7 @@ All settings and environment variables: [docs/CONFIGURATION.md](docs/CONFIGURATI
 ## Testing and evaluation
 
 ```bash
-pytest -q                                   # 23 tests, no network or model needed
+pytest -q                                   # 43 tests, no network or model needed
 python eval/demo_cases.py                   # Airbnb/Duolingo/Zoom/Uber-style ideas, live
 python eval/demo_cases.py --only uber       # one case
 ```
@@ -149,8 +160,8 @@ and whether any agent fails. How to read it: [docs/EVALUATION.md](docs/EVALUATIO
 
 | Document | Contents |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Pipeline stages, data flow, concurrency, failure handling |
-| [docs/AGENTS.md](docs/AGENTS.md) | Every agent: role, tools, output schema; the tool-calling protocol |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | v2 and agentic engines, retrieval, evidence packs, checkpoints, failure handling |
+| [docs/AGENTS.md](docs/AGENTS.md) | Every agent: role, output schema; the v2 extraction roles and the agentic tool-calling protocol |
 | [docs/QUALITY_AND_EVIDENCE.md](docs/QUALITY_AND_EVIDENCE.md) | Evidence ledger, grounding checks, critic loop, evidence grade, verdict guardrail |
 | [docs/FINANCIAL_MODEL.md](docs/FINANCIAL_MODEL.md) | Every formula, scenario multiplier and sanity check |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Env vars, model choice, search providers, troubleshooting |
@@ -160,8 +171,8 @@ and whether any agent fails. How to read it: [docs/EVALUATION.md](docs/EVALUATIO
 
 ## Known limitations
 
-- **Small models are the bottleneck.** 7B models often return thin or malformed research; the critic loop
-  and JSON repair help, but a 14B+ model produces much better reports.
+- **Model size still matters.** Schema-constrained output removes most malformed JSON, but 7B models write thin
+  summaries; 14B+ is recommended. Local generation is slow (minutes per section on a laptop).
 - **Free web sources are shallow.** News, Wikipedia and Hacker News are good for trends and pain points but
   rarely contain paid market-size reports. Expect TAM/SAM to be mostly labelled estimates.
 - **Grounding is lexical, not semantic.** The checks catch missing citations, numbers absent from the source

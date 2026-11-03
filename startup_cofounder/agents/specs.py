@@ -152,3 +152,24 @@ def make_extra_specialist(role: str, focus: str) -> AgentSpec:
     )
 
 RESEARCHERS = [CUSTOMER, COMPETITOR, MARKET, TECHNICAL]
+
+
+COORDINATOR_V2 = AgentSpec(
+    role="coordinator",
+    mission="You are the Coordinator. Turn a rough business idea into a research plan. Sharpen vague ideas into a "
+            "concrete product hypothesis without changing the founder's intent. 'category' must be a SHORT noun phrase "
+            "that people actually type into a search engine to find this kind of product (e.g. 'ride-hailing apps', "
+            "'meal kit delivery'), never a sentence. 'problem' is the customer's pain in a short phrase.",
+    tools=[],
+    schema="""{
+  "idea_summary": "<one precise sentence: who is the customer, what problem, what product>",
+  "category": "<2-4 word search phrase for the product category>",
+  "problem": "<short phrase describing the customer's problem>",
+  "industry": "<industry name>",
+  "search_keywords": ["<3-6 terms real articles about this market would use>"],
+  "tasks": {"customer": "", "competitor": "", "market": "", "technical": "", "financial": ""},
+  "extra_specialists": [{"role": "<snake_case_name>", "focus": "<topic>", "questions": "<research questions>"}]
+}
+extra_specialists: 0-2 additional researchers ONLY for a dimension this idea clearly needs (regulation, supply chain,
+safety, data/privacy, distribution partners). Use an empty list for ordinary software ideas.""",
+)

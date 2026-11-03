@@ -1,5 +1,10 @@
 # Agents
 
+> **Two engines.** The default v2 engine does not run tool-calling loops: code retrieves evidence and each role below
+> is a single schema-constrained extraction call over an evidence pack (`pipeline_v2.py`, `extract.py`). The roles,
+> missions and output schemas on this page apply to both engines. The tool-calling protocol section describes the
+> **agentic** engine (`--engine agentic`).
+
 All agents share one implementation (`agents/base.py`); they differ only in their `AgentSpec`
 (`agents/specs.py`): role, mission, tools and output schema.
 

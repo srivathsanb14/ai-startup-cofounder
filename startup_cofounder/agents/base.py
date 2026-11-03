@@ -43,6 +43,7 @@ class AgentSpec:
     tools: List[str] = field(default_factory=list)
     max_tool_calls: Optional[int] = None  # None -> config default
     extra_task: str = ""  # research questions for coordinator-created specialists
+    focus: str = ""  # topic of a coordinator-created specialist
 
 
 @dataclass

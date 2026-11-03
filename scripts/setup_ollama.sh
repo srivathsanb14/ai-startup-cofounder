@@ -9,6 +9,7 @@
 #
 # Options:
 #   --model NAME           model to pull (default: qwen2.5:14b-instruct, ~9 GB; 7b-instruct is ~5 GB)
+#   --fast-model NAME      also pull a smaller model for extraction steps and set LLM_FAST_MODEL (e.g. qwen2.5:7b-instruct)
 #   --dry-run              print every action without running it
 #   --yes                  do not ask for confirmation before downloading
 #   --no-pull              install/start Ollama but do not pull a model
@@ -23,6 +24,7 @@
 set -euo pipefail
 
 MODEL="${MODEL:-qwen2.5:14b-instruct}"
+FAST_MODEL="${FAST_MODEL:-}"
 DRY_RUN=0
 ASSUME_YES=0
 NO_PULL=0
@@ -43,7 +45,7 @@ die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 cleanup() { [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"; return 0; }
 trap cleanup EXIT
 
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # Run a command, or only print it in dry-run mode.
 run() {
@@ -57,6 +59,7 @@ run() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --model)              [ $# -ge 2 ] || die "--model needs a value"; MODEL="$2"; shift 2 ;;
+    --fast-model)         [ $# -ge 2 ] || die "--fast-model needs a value"; FAST_MODEL="$2"; shift 2 ;;
     --dry-run)            DRY_RUN=1; shift ;;
     --yes|-y)             ASSUME_YES=1; shift ;;
     --no-pull)            NO_PULL=1; shift ;;
@@ -67,6 +70,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$MODEL" in *[!A-Za-z0-9._:/-]*|"") die "model name contains unexpected characters: '$MODEL'" ;; esac
+case "$FAST_MODEL" in *[!A-Za-z0-9._:/-]*) die "fast model name contains unexpected characters: '$FAST_MODEL'" ;; esac
 
 OS="$(uname -s)"
 case "$OS" in Darwin|Linux) ;; *) die "unsupported OS '$OS'. Install Ollama manually from https://ollama.com/download" ;; esac
@@ -195,6 +199,16 @@ else
   run "$OLLAMA_BIN" pull "$MODEL"
 fi
 
+if [ -n "$FAST_MODEL" ] && [ "$NO_PULL" != 1 ]; then
+  if [ "$DRY_RUN" != 1 ] && "$OLLAMA_BIN" list 2>/dev/null | awk 'NR>1 {print $1}' | grep -Fxq "$FAST_MODEL"; then
+    log "Fast model $FAST_MODEL already pulled"
+  else
+    confirm "Also pull the fast model $FAST_MODEL?" || die "aborted by user"
+    log "Pulling fast model $FAST_MODEL"
+    run "$OLLAMA_BIN" pull "$FAST_MODEL"
+  fi
+fi
+
 # --- 5. verify the model answers --------------------------------------------------------------------------
 if [ "$DRY_RUN" = 1 ]; then
   log "Would send a test chat request to $HOST/v1/chat/completions and check for a reply"
@@ -225,6 +239,7 @@ log "Configuring $ENV_FILE"
 if [ "$DRY_RUN" = 1 ]; then
   printf '   [dry-run] create .env from .env.example if missing (existing .env backed up to .env.bak)\n'
   printf '   [dry-run] set LLM_BACKEND=openai LLM_BASE_URL=%s/v1 LLM_MODEL=%s\n' "$HOST" "$MODEL"
+  [ -n "$FAST_MODEL" ] && printf '   [dry-run] set LLM_FAST_MODEL=%s\n' "$FAST_MODEL"
   [ "$DISABLE_SEARCH" = 1 ] && printf '   [dry-run] set DISABLED_TOOLS=web_search\n'
 else
   [ -f "$PROJECT_DIR/.env.example" ] || die "missing $PROJECT_DIR/.env.example"
@@ -232,6 +247,7 @@ else
   set_env LLM_BACKEND openai
   set_env LLM_BASE_URL "$HOST/v1"
   set_env LLM_MODEL "$MODEL"
+  [ -n "$FAST_MODEL" ] && set_env LLM_FAST_MODEL "$FAST_MODEL"
   [ "$DISABLE_SEARCH" = 1 ] && set_env DISABLED_TOOLS web_search
   true
 fi

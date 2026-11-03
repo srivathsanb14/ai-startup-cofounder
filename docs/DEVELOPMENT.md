@@ -12,7 +12,14 @@ startup_cofounder/
   evidence.py                   EvidenceLedger, Finding, grounding checks
   quality.py                    rule gaps, competitor verification, evidence grade, verdict guardrail
   finance.py                    projection, unit economics, scenarios, sensitivity, sanity flags
-  pipeline.py                   orchestration and the Assessment dataclass
+  pipeline.py                   agentic engine, Assessment dataclass, shared economics()
+  pipeline_v2.py                v2 engine (retrieve-then-extract), build_pipeline() factory
+  retrieval.py                  query templates, parallel search, page fetch, evidence packs
+  passages.py                   chunking and BM25 ranking, PassageIndex
+  competitors.py                candidate ranking and profile helpers
+  extract.py                    Extractor: schema-constrained JSON calls with repair
+  schemas.py                    JSON Schemas for constrained decoding
+  checkpoint.py                 stage checkpoints for resume
   report.py                     markdown renderer
   agents/
     base.py                     Agent loop, AgentSpec, AgentResult, protocol prompt
@@ -46,7 +53,17 @@ Python 3.9+ is supported; modules use `from __future__ import annotations`.
 
 Tools must never raise to the agent; `Tool.run` already converts exceptions to error results.
 
-## Adding a core agent
+## Adding a section (v2 engine)
+
+1. Add an `AgentSpec` in `agents/specs.py` (its `mission` and `schema` text are reused as the extraction prompt) and a JSON
+   Schema in `schemas.py` registered in `BY_ROLE`.
+2. Add query templates to `SECTION_QUERIES` (and optionally `FOLLOWUP_QUERIES`) in `retrieval.py`.
+3. Add the role to `CORE_SECTIONS` and `specs.RESEARCHERS`, a default task in `DEFAULT_TASKS`, and render it in `report.py`.
+4. Optionally add a rule in `quality.rule_gaps`, and a placeholder in `MockLLM._final`.
+
+Extra specialists need no code: the coordinator creates them per idea.
+
+## Adding a core agent (agentic engine)
 
 1. Define an `AgentSpec` in `agents/specs.py` with `role`, `mission`, `tools` and a literal JSON `schema`.
    Include `FINDINGS_SCHEMA` so claims are citable.

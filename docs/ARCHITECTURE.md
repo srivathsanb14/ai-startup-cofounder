@@ -1,97 +1,120 @@
 # Architecture
 
-This document explains how a request flows through the system and why it is built this way.
-Code references are to files under `startup_cofounder/`.
+How a request flows through the system and why it is built this way. Code references are to files under
+`startup_cofounder/`.
+
+The project has two engines that share the same evidence ledger, quality checks, financial model and report:
+
+| Engine | Module | Idea | Use it when |
+|---|---|---|---|
+| **v2** (default) | `pipeline_v2.py` | **Retrieve first, then extract.** Code gathers evidence; the model only reads it and answers in a fixed schema. | normally; it is faster and finds more evidence |
+| **agentic** | `pipeline.py` + `agents/` | Each agent runs its own tool-calling loop and chooses its own searches. | strong models that plan searches well, or for comparison |
+
+Select with `ENGINE=v2|agentic`, `--engine`, or the UI sidebar.
 
 ## Design principles
 
-1. **LLMs propose, code verifies and computes.** Language models are good at reading messy text and
-   making judgment calls, and bad at arithmetic and honesty about what they don't know. So models
-   gather and summarize evidence and suggest assumptions; deterministic code checks citations, validates
-   competitor names, runs the financial model and caps the verdict.
-2. **Every claim is traceable.** Evidence gets an id the moment it is retrieved; claims carry ids to the end.
-3. **Degrade, don't crash.** Any single failure (tool error, bad JSON, crashed agent) lowers report quality
-   and adds a warning; it never aborts the run.
-4. **Works with small open models.** Tool calling uses a plain-JSON protocol (no native function-calling
-   support needed) with lenient parsing.
+1. **LLMs read and judge; code retrieves, verifies and computes.** Models are good at reading messy text and bad at
+   arithmetic and at knowing when they don't know. So code plans and runs searches, ranks passages, checks
+   citations, validates competitor names, runs the financial model and caps the verdict.
+2. **Every claim is traceable.** Evidence gets an id when retrieved and keeps it through to the report.
+3. **Degrade, don't crash.** Any single failure lowers report quality and adds a warning; it never aborts the run.
+4. **Don't redo finished work.** Every v2 stage is checkpointed.
+5. **Works with small open models.** Schema-constrained output removes most format failures.
 
-## Pipeline (`pipeline.py`)
+## Why v2 exists (what the first live evaluation showed)
 
-| # | Stage | Runs | What happens |
+With the agentic engine and a 14B local model, one evaluation case took 34 minutes, found 1 of 5 known competitors,
+and only 17% of findings were sourced facts; the synthesizer timed out. The causes were architectural:
+the model chose its own queries (poorly), each agent saw only its own search results, evidence was a 400-character
+snippet, malformed JSON caused redos, and one timeout lost the whole run. v2 addresses each directly.
+
+| Problem | v2 change |
+|---|---|
+| Model picks weak queries | Query **templates** per section run in parallel, no LLM involved (`retrieval.py`) |
+| Agents can't see each other's evidence | One shared evidence ledger; sections draw their packs from it |
+| Snippets too short to support claims | Top pages fetched **in full**, split into passages, ranked by BM25 against the question (`passages.py`) |
+| Competitor list depends on model memory | **Staged discovery**: extract names, rank by mentions in all evidence, drop unseen names, profile each top name with its own searches (`competitors.py`) |
+| Invalid JSON, "no usable output" redos | **Schema-constrained decoding** (`schemas.py`, `llm.py`) with automatic fallback |
+| Everything runs on the biggest model | Optional **fast model** for extraction; main model for judgment (`LLM_FAST_MODEL`) |
+| A timeout loses the run | **Stage checkpoints**; rerun resumes (`checkpoint.py`) |
+
+## v2 pipeline (`pipeline_v2.py`)
+
+| # | Stage | LLM? | What happens |
 |---|---|---|---|
-| 1 | Coordinator | 1 agent, no tools | Rewrites the idea as one precise sentence, picks search keywords, writes research questions for each specialist, and may request 0-2 **extra specialists** for idea-specific topics (regulation, supply chain, ...). |
-| 2 | Researchers | 4 core + extras, **in parallel** (thread pool, `MAX_WORKERS`) | Customer, Competitor, Market, Technical (+ extras). Each runs the tool loop and returns structured JSON plus cited findings. |
-| 3 | Review loop | rule checks + Critic agent, then redo | See below. Repeats for `CRITIC_ROUNDS`. |
-| 4 | Competitor verification | code | Each competitor name is searched for in all retrieved evidence; confirmed ones rank first and are marked in the report. |
-| 5 | Financial | 1 agent, then code | The agent reads the research and proposes assumptions (price, churn, CAC, team, startup costs). `finance.py` sanitizes them and computes the projection, unit economics, 3 scenarios and a sensitivity table; `sanity_flags` list implausible results. |
-| 6 | Synthesizer | 1 agent, no tools | Reads all research plus the **computed** numbers, flags and evidence grade, and writes the verdict, scope, risks, validation steps and outlook. |
-| 7 | Guardrail | code | `quality.cap_verdict` downgrades "go" to "validate_first" unless evidence grade is A/B, LTV/CAC >= 3 and break-even happens within 5 years. |
-| 8 | Report | code | `report.py` renders markdown; `Assessment.to_dict()` gives the full JSON. |
+| 1 | Plan | fast | Coordinator returns the sharpened idea, a short search **category** and **problem** phrase, per-section tasks and 0-2 extra specialists. |
+| 2 | Retrieval | no | `retrieval.build_queries` fills templates for customer, competitor, market, technical, financial (and extras); `run_queries` executes them in parallel. A disabled or blocked `web_search` falls back to news headlines. |
+| 3 | Page fetch | no | The top pages per section are downloaded in full (cached) and split into ~650-character passages. |
+| 4 | Extraction | fast | Customer, market, technical and extras run in parallel. Each receives an **evidence pack**: the most relevant snippets and passages for its question, with ids. Output is schema-constrained JSON with cited findings. |
+| 4b | Competitors | fast | Names extracted from the competitor evidence, ranked by mentions across *all* evidence (unseen names dropped), top names searched and profiled in parallel, then summarized by the main model. |
+| 5 | Review | main | `quality.rule_gaps` plus a critic LLM. A flagged section gets **follow-up queries**, more pages, and re-extraction with its previous answer and the feedback. Repeats for `CRITIC_ROUNDS`. |
+| 6 | Verify | no | Competitor names checked against evidence; confirmed ones rank first. |
+| 7 | Financial | main | Reads the research plus pricing benchmarks and proposes assumptions. |
+| 8 | Economics | no | `finance.py`: projection, unit economics, scenarios, sensitivity, sanity flags; `quality.evidence_grade`. |
+| 9 | Synthesis | main | Decision memo from research summaries and the computed numbers. |
+| 10 | Guardrail | no | `quality.cap_verdict` downgrades an unsupported "go". |
 
-### The review loop (stage 3)
+Stages 1, 2, 4/4b, 5, 7 and 9 are saved to `.cache/runs/<key>.json` together with the evidence ledger. Restoring
+the ledger in order reproduces the same ids, so a resumed run is indistinguishable from an uninterrupted one.
+The key hashes the idea, backend, models, offline flag and disabled tools; `--fresh` ignores it.
 
-```
-for round in 1..CRITIC_ROUNDS:
-    rule_gaps   = quality.rule_gaps(results)          # deterministic: counts, missing fields, unconfirmed names
-    critic_gaps = Critic agent(research + rule_gaps)  # judgment: unsupported claims, implausible numbers
-    gaps        = merge(rule_gaps, critic_gaps)[:3]   # one per agent, rules first, capped for cost
-    if no gaps: stop
-    for each gap (in parallel): re-run that agent with
-        - its previous answer
-        - the specific feedback
-        - a request to return the COMPLETE improved output
-    keep the new output only if it is valid, otherwise keep the old one
-```
+### Evidence packs
 
-Rules come first because they are cheap and reliable; the LLM critic only adds what rules cannot see.
-Re-runs add to the shared evidence ledger, so new sources are available to later stages.
+For a section, `evidence_pack(question, ids, ...)` ranks that section's search snippets and the passages of its
+fetched pages against the question with BM25 and keeps the best ~10 snippets and ~8 passages. Chosen passages are
+registered in the ledger as sources (`<page-url>#p<n>`, tool `passage`), so the model cites them like any source
+and the grounding check compares claims against the exact passage text rather than a short snippet.
 
-## Data model
+## The agentic engine (`pipeline.py`, `agents/`)
 
-- `Source` (`evidence.py`): `id`, `title`, `url`, `snippet`, `tool`.
-- `EvidenceLedger`: thread-safe, de-duplicates by URL, shared by every agent in a run.
+Coordinator, then parallel tool-using agents (customer, competitor, market, technical, plus dynamic specialists),
+a critic loop, a financial agent and a synthesizer. Each agent replies with one JSON object per turn, either a
+tool call or `{"final": ...}`. Details in [AGENTS.md](AGENTS.md). It shares `economics()`, `quality.py`,
+`finance.py` and `report.py` with v2.
+
+## Shared layers
+
+### Data model
+- `Source` (`evidence.py`): `id`, `title`, `url`, `snippet`, `tool`. `EvidenceLedger`: thread-safe, de-duplicates by URL.
 - `Finding`: `claim`, `kind` (fact/estimate), `source_ids`, `downgraded`, `note`.
-- `AgentResult`: `role`, `output` (dict), `findings`, `trace` (every tool call), `error`.
-- `Assessment` (`pipeline.py`): everything the report needs, including `review_log`, `scenarios`,
-  `sensitivity`, `unit_economics`, `flags`, `grade`, `verdict`, `verdict_note`.
+- `AgentResult`: `role`, `output`, `findings`, `trace`, `error`. v2 builds these from checkpointed raw outputs so the
+  quality rules and the report work unchanged.
+- `Assessment`: everything the report needs, including `review_log`, `scenarios`, `sensitivity`, `grade`, `verdict`.
 
-## Tool layer (`tools/`)
-
-Tools return `ToolResult(sources=[{title,url,snippet}], text, error)`. `Tool.run` catches every
-exception and returns it as an error result, so an agent sees "tool error: ..." and can try something else.
+### Tool layer (`tools/`)
+Tools return `ToolResult(sources, text, error)` and never raise to callers (`Tool.run` converts exceptions). All network
+access goes through `Http.get` with a 24-hour disk cache and an offline switch.
 
 | Tool | Backend | Best for |
 |---|---|---|
-| `web_search` | Brave API, then SearXNG, then DuckDuckGo HTML | competitors, pricing, product pages |
-| `news_search` | Google News RSS | market trends, funding, launches |
-| `wikipedia` | MediaWiki API | industry and company background |
-| `hn_search` | Hacker News (Algolia) | customer pain points, technical feasibility |
-| `fetch_page` | `requests` + BeautifulSoup | reading a specific page (pricing page, report) |
+| `web_search` | Brave API, then SearXNG, then DuckDuckGo HTML | competitors, pricing |
+| `news_search` | Google News RSS | trends, funding, launches |
+| `wikipedia` | MediaWiki API | background |
+| `hn_search` | Hacker News (Algolia) | pain points, feasibility |
+| `fetch_page` / `page_text` | requests + BeautifulSoup | reading a specific page in full |
 
-All network access goes through `Http.get`, which adds a 24-hour disk cache (`.cache/`) so repeated runs
-and evals are fast and reproducible, and which raises `OfflineError` in `--offline` mode.
+`DISABLED_TOOLS` hides tools; v2 retrieval substitutes news headlines for a disabled or failing `web_search`.
 
-## LLM layer (`llm.py`)
+### LLM layer (`llm.py`)
+`OpenAICompatLLM.chat(messages, json_mode, schema)` calls `/chat/completions`. With a `schema` it sends
+`response_format: json_schema`; if the server answers HTTP 400 it degrades to `json_object`, then to unconstrained
+output, without using up retries. `build_llm(config, fast=True)` returns the cheaper model when `LLM_FAST_MODEL` is
+set. `MockLLM` follows both protocols and powers the tests and `--mock`.
 
-- `OpenAICompatLLM`: `POST {LLM_BASE_URL}/chat/completions`. Retries on server/network errors, and retries
-  without `response_format` if a server rejects JSON mode.
-- `MockLLM`: deterministic stand-in that follows the same protocol for every role. Used by the tests and
-  by `--mock`. It cites real retrieved evidence when available but its prose is placeholder text.
+### Concurrency
+Retrieval and page fetching are I/O-bound and run in thread pools. Extraction calls run in parallel too, though a
+single local GPU serializes generation, so the large wins come from needing far fewer, shorter model calls.
 
-## Concurrency
-
-Agents are I/O-bound (model server + web), so a `ThreadPoolExecutor` runs them in parallel. The ledger uses
-a lock. With a single local GPU the model server serializes generation anyway, so parallelism mostly helps
-overlap web calls; set `MAX_WORKERS=1` if your model server struggles with concurrent requests.
-
-## Failure handling summary
+## Failure handling
 
 | Failure | Behavior |
 |---|---|
-| Tool raises / network down / blocked | Returned to the agent as an error observation; agent tries another tool or finishes with estimates |
-| Model emits invalid JSON | Up to 2 repair nudges, then the agent returns an error result |
-| Model skips the `{"final": ...}` wrapper | Accepted if the object has real content |
-| Agent crashes or returns nothing | Stage continues; the critic/rules flag it and it is retried once; a warning is added if still failing |
-| Coordinator fails | Default research plan is used |
-| Financial agent gives no/garbage assumptions | Generic SaaS defaults after clamping; warning added |
-| Synthesizer gives no/invalid verdict | `validate_first` |
+| Search provider blocked or tool error | Observation/empty result; v2 falls back to news headlines |
+| Page fetch fails | Skipped; the rest of the pack is used |
+| Model emits invalid JSON | Constrained decoding prevents most; the extractor repairs up to twice; then the section errors |
+| A section errors or is thin | Rule check flags it; the review loop retries with follow-up retrieval |
+| Model server timeout or crash mid-run | Rerun the same command; finished stages are restored from the checkpoint |
+| Coordinator fails | Default plan using the raw idea as the category |
+| Financial agent gives nothing usable | Generic SaaS defaults after clamping; warning added |
+| Synthesizer fails or gives an invalid verdict | `validate_first` plus a note |

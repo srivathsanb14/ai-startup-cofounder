@@ -25,6 +25,7 @@ class Config:
     backend: str = "openai"  # "openai" (any OpenAI-compatible server) or "mock"
     base_url: str = "http://localhost:11434/v1"
     model: str = "qwen2.5:7b-instruct"
+    fast_model: str = ""  # optional cheaper model for extraction (same as model when empty)
     api_key: str = "ollama"
     temperature: float = 0.2
     timeout: int = 600
@@ -33,6 +34,8 @@ class Config:
     critic_rounds: int = 1  # review-and-redo rounds; 0 disables the critic loop
     max_extra_specialists: int = 2  # extra agents the coordinator may add for idea-specific topics
     offline: bool = False
+    engine: str = "v2"  # "v2" retrieve-then-extract, or "agentic" (tool-calling loops)
+    resume: bool = True  # reuse stage checkpoints from an interrupted run of the same idea
     cache_dir: Path = ROOT / ".cache"
     output_dir: Path = ROOT / "outputs"
 
@@ -44,6 +47,7 @@ class Config:
             backend=env.get("LLM_BACKEND", cls.backend),
             base_url=env.get("LLM_BASE_URL", cls.base_url).rstrip("/"),
             model=env.get("LLM_MODEL", cls.model),
+            fast_model=env.get("LLM_FAST_MODEL", cls.fast_model),
             api_key=env.get("LLM_API_KEY", cls.api_key),
             temperature=float(env.get("LLM_TEMPERATURE", cls.temperature)),
             timeout=int(env.get("LLM_TIMEOUT", cls.timeout)),
@@ -52,6 +56,8 @@ class Config:
             critic_rounds=int(env.get("CRITIC_ROUNDS", cls.critic_rounds)),
             max_extra_specialists=int(env.get("MAX_EXTRA_SPECIALISTS", cls.max_extra_specialists)),
             offline=env.get("OFFLINE", "0") == "1",
+            engine=env.get("ENGINE", cls.engine),
+            resume=env.get("RESUME", "1") != "0",
         )
         for key, value in overrides.items():
             if value is not None:

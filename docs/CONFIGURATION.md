@@ -10,11 +10,14 @@ Settings come from environment variables, optionally loaded from `.env` in the p
 | `LLM_BACKEND` | `openai` | `openai` = any OpenAI-compatible server; `mock` = placeholder LLM |
 | `LLM_BASE_URL` | `http://localhost:11434/v1` | Server root (Ollama default shown) |
 | `LLM_MODEL` | `qwen2.5:7b-instruct` | Model name as the server knows it |
+| `LLM_FAST_MODEL` | empty | Smaller model for the v2 extraction steps (coordinator, sections, profiles); empty means use `LLM_MODEL` |
 | `LLM_API_KEY` | `ollama` | Bearer token; local servers ignore it |
 | `LLM_TEMPERATURE` | `0.2` | Low is better for structured output |
 | `LLM_TIMEOUT` | `600` | Seconds per model call (a 14B model on a laptop needs minutes for long prompts) |
-| `MAX_TOOL_CALLS` | `6` | Tool calls per agent |
-| `MAX_WORKERS` | `4` | Agents running in parallel |
+| `ENGINE` | `v2` | `v2` retrieve-then-extract, or `agentic` tool-calling loops |
+| `RESUME` | `1` | Resume an interrupted run of the same idea from its stage checkpoints (`0` disables) |
+| `MAX_TOOL_CALLS` | `6` | Tool calls per agent (agentic engine only) |
+| `MAX_WORKERS` | `4` | Sections/searches running in parallel |
 | `CRITIC_ROUNDS` | `1` | Review-and-redo rounds; `0` disables the critic loop |
 | `MAX_EXTRA_SPECIALISTS` | `2` | Extra idea-specific agents the coordinator may add; `0` disables |
 | `BRAVE_API_KEY` | empty | Enables Brave Search for `web_search` |
@@ -35,7 +38,7 @@ Settings come from environment variables, optionally loaded from `.env` in the p
 | Verify | sends a test request to the OpenAI-compatible endpoint and checks for a reply |
 | Configure | creates `.env` from `.env.example` if missing (backs up an existing one to `.env.bak`) and sets `LLM_BACKEND`, `LLM_BASE_URL`, `LLM_MODEL` |
 
-Flags: `--dry-run` (print only), `--model NAME`, `--yes` (no prompts), `--no-pull`, `--disable-web-search`.
+Flags: `--dry-run` (print only), `--model NAME`, `--fast-model NAME` (also pulls it and sets `LLM_FAST_MODEL`), `--yes` (no prompts), `--no-pull`, `--disable-web-search`.
 
 ## Choosing a model
 
@@ -60,18 +63,34 @@ Other servers: vLLM (`--served-model-name`), llama.cpp (`llama-server`), LM Stud
 
 `news_search`, `wikipedia`, `hn_search` and `fetch_page` need no keys.
 
+## Two models: main and fast
+
+Extraction (reading evidence into structured JSON) is the bulk of the calls and does not need the biggest model.
+Set `LLM_FAST_MODEL=qwen2.5:7b-instruct` with `LLM_MODEL=qwen2.5:14b-instruct`: the fast model handles the coordinator,
+all section extraction and competitor profiles; the main model handles the competitor summary, critic, financial
+assumptions and the final memo. Ollama loads both models on demand, so you need memory for them or accept swap time;
+with the same model for both (the default) there is no swapping.
+
+## Resuming interrupted runs
+
+v2 saves each finished stage to `.cache/runs/<key>.json`. If a run is interrupted (timeout, closed laptop, killed
+process), run the same command again and it resumes. The key covers the idea, backend, models, offline flag and
+`DISABLED_TOOLS`, so changing any of them starts fresh. Use `--fresh` to force a clean run, or delete `.cache/runs/`.
+
 ## Cost and speed
 
-Rough model calls per run with defaults: coordinator 1 + each of 5 researchers up to 7 + critic 1 + redos (up to 3
-agents x up to 7) + financial up to 4 + synthesizer 1. A typical run is 30-60 calls. To go faster use
-`--rounds 0 --max-tools 3`, or `MAX_EXTRA_SPECIALISTS=0`.
+Rough model calls per v2 run with defaults: coordinator 1, sections 3 + extras, competitors about 6 (names, up to 4
+profiles, summary), critic 1, up to 3 redos, financial 1, synthesizer 1: about 15-20 calls, each with a short prompt
+(retrieval is not an LLM call). The agentic engine needs 30-60 longer calls. To go faster use `--rounds 0` or
+`MAX_EXTRA_SPECIALISTS=0`.
 
 ## Troubleshooting
 
 | Symptom | Likely cause and fix |
 |---|---|
 | `LLM call failed ... Is your model server running` | Start it (`ollama serve`), check `LLM_BASE_URL` and that `LLM_MODEL` is pulled |
-| Report warns about failed agents | Model emitted invalid JSON repeatedly: use a larger model, lower `LLM_TEMPERATURE`, or raise `LLM_TIMEOUT` |
+| Report warns about failed agents | Model server timed out or crashed: raise `LLM_TIMEOUT`, check `ollama ps`, then rerun the same command to resume from the checkpoint |
+| Rerun returns instantly with old results | It resumed a completed run; use `--fresh` for new research |
 | Evidence grade D, "every finding is an estimate" | Offline mode, no network, or search blocked: set a search provider or check connectivity |
 | Many "downgraded" claims in Evidence quality | Normal with small models; they paraphrase numbers. Try a bigger model or `MAX_TOOL_CALLS=8` |
 | `web_search` says blocked | DuckDuckGo bot check: set `BRAVE_API_KEY` or `SEARXNG_URL` |

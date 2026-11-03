@@ -115,16 +115,21 @@ def hn_search(query: str) -> ToolResult:
     return ToolResult(sources=sources, text="" if sources else "no results")
 
 
-def fetch_page(url: str) -> ToolResult:
-    if not url.startswith(("http://", "https://")):
-        return ToolResult(text="url must start with http(s)://", error=True)
+def page_text(url: str, limit: int = 30000):
+    """Download a page and return (title, cleaned text up to `limit` characters)."""
     html = Http.get(url, timeout=15)
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "svg"]):
         tag.decompose()
     title = soup.title.get_text() if soup.title else url
-    body = _clean(soup.get_text(" "), 2500)
-    return ToolResult(sources=[{"title": _clean(title, 150), "url": url, "snippet": body}])
+    return _clean(title, 150), _clean(soup.get_text(" "), limit)
+
+
+def fetch_page(url: str) -> ToolResult:
+    if not url.startswith(("http://", "https://")):
+        return ToolResult(text="url must start with http(s)://", error=True)
+    title, body = page_text(url, 2500)
+    return ToolResult(sources=[{"title": title, "url": url, "snippet": body}])
 
 
 ALL_TOOLS = {

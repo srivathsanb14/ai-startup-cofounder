@@ -10,15 +10,19 @@ the project proposal.
 ```bash
 python eval/demo_cases.py                    # all cases, your configured model, live web
 python eval/demo_cases.py --only zoom        # filter by name or idea text
+python eval/demo_cases.py --engine agentic   # evaluate the older engine for comparison
+python eval/demo_cases.py --rounds 2         # more critic rounds
 python eval/demo_cases.py --mock --offline   # harness smoke test only (scores will be ~0)
 ```
 
 Outputs: `outputs/eval-<case>.md` (full report), `outputs/eval-results.json` (metrics), and a summary table:
 
 ```
-case       recall  top3 ok  fact %    grade   errors
-uber       0.6     2        41        B       0
+case       recall  top3 ok  fact %    grade   errors min
+<case>     <0-1>   <0-3>    <0-100>   A-D     <n>    <minutes>
 ```
+
+The v2 engine always runs with `fresh=True` here so results never come from a checkpoint.
 
 ## Running without a search provider
 
@@ -48,6 +52,7 @@ Expect lower `competitor_recall` and `sources`; record this setting alongside yo
 | `evidence_grade` | A-D, see [QUALITY_AND_EVIDENCE.md](QUALITY_AND_EVIDENCE.md) | B or better |
 | `critic_redos` | number of agent redos the review loop triggered | 0-3 |
 | `agent_errors` | agents that failed outright | none |
+| `minutes` | wall-clock time for the case | single digits to tens of minutes locally |
 | `breakeven_year`, `ltv_cac` | plausibility of the economics for a known-successful business | break-even within 5 years, LTV/CAC around 3+ |
 | `verdict` | what the system concluded | for a proven business, `go` or `validate_first`, not `no_go` |
 
@@ -73,7 +78,8 @@ Keep the idea generic (never name the company) and use lowercase substrings for 
 
 ## Automated tests (`tests/`)
 
-`pytest -q` runs 23 fast tests with no network or model: grounding checks, ledger behavior, financial math,
+`pytest -q` runs 43 fast tests with no network or model: grounding checks, ledger behavior, financial math,
 scenarios and sensitivity, competitor verification, rule-based gaps, grade and guardrail, provider fallback order,
 the full pipeline with the mock LLM, the critic loop re-running an agent, and survival of a model that never emits
-valid JSON. These test the *machinery*; the eval harness tests the *research quality*.
+valid JSON, BM25 passage ranking, query templates and fallbacks, competitor ranking, checkpoint resume, schema fallback in the
+LLM client, and the v2 review loop recovering a failed extraction. These test the *machinery*; the eval harness tests the *research quality*.

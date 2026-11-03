@@ -35,6 +35,8 @@
 
 ## Beyond the proposal (agentic behavior)
 
+- **Retrieve-then-extract engine (v2):** deterministic retrieval, full-page evidence, staged competitor discovery, schema-constrained output, optional two-model split and resumable runs, added after the first live evaluation showed the tool-loop design was slow and weak on competitors. The original agentic engine is kept for comparison.
+
 - **Tool loops with autonomy:** each agent chooses queries, reads results, fetches pages and decides when to stop.
 - **Critic loop:** automated plus LLM review that sends weak sections back for another pass.
 - **Dynamic planning:** the coordinator can create new specialist agents per idea.

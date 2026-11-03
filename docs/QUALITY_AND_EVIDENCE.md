@@ -8,6 +8,10 @@ guesswork, and how much to trust the whole report. This document describes each 
 Every search result or fetched page is registered with an id (`E1`, `E2`, ...). Duplicates (same URL) reuse the
 same id. Agents see ids in tool observations and cite them in findings.
 
+In the v2 engine, full-page **passages** are also registered as sources (`<url>#p3`, tool `passage`), so a claim is
+checked against the exact ~650-character passage it cites rather than a short search snippet. This is meant to keep
+more true claims as facts than short snippets allow (to be confirmed by the evaluation).
+
 ## 2. Grounding checks on findings
 
 A finding the agent labels `fact` is kept as a fact only if it passes all of these, otherwise it becomes an
@@ -47,8 +51,9 @@ competitor from memory is allowed, but it is visibly marked.
 
 ### LLM critic
 The Critic agent receives the research and the rule findings and adds only decision-relevant gaps. At most 3
-gaps per round are acted on (one per agent, rules first). Each flagged agent is re-run with its previous answer
-and the feedback, and the new output replaces the old one only if it is valid. The report's **Quality review**
+gaps per round are acted on (one per agent, rules first). In the agentic engine each flagged agent is re-run with its previous answer
+and the feedback; in v2 the section first gets follow-up searches and more pages, then is re-extracted with its previous
+answer and the feedback (competitors also get a wider candidate search), and the new output replaces the old one only if it is valid. The report's **Quality review**
 section lists every redo and whether it improved.
 
 ## 5. Evidence grade (`quality.evidence_grade`)

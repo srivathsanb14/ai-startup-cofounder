@@ -78,6 +78,34 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z]+", "_", str(text).lower()).strip("_")[:24]
 
 
+@dataclass
+class Economics:
+    projection: Projection
+    unit_economics: dict
+    scenarios: Dict[str, Projection]
+    sensitivity: List[dict]
+    flags: List[str]
+    grade: str
+    grade_reasons: List[str]
+    computed: dict  # authoritative numbers handed to the synthesizer
+
+
+def economics(results: Dict[str, AgentResult], fin_output: dict, source_count: int) -> Economics:
+    """All deterministic numbers: projection, unit economics, scenarios, sensitivity, flags, evidence grade."""
+    projection = project(fin_output.get("assumptions"))
+    ue = unit_economics(projection.assumptions)
+    scen = scenarios(projection.assumptions)
+    sens = sensitivity(projection.assumptions)
+    mkt = results.get("market")
+    tss = mkt.output.get("tam_sam_som") if mkt and isinstance(mkt.output.get("tam_sam_som"), dict) else {}
+    flags = sanity_flags(projection, ue, tss.get("sam_usd"))
+    grade, reasons = quality.evidence_grade(results, source_count)
+    computed = {"projection": projection.to_dict(), "unit_economics": ue, "sanity_flags": flags,
+                "scenario_year5_operating_profit": {k: round(float(v.table.iloc[-1]["operating_profit"])) for k, v in scen.items()},
+                "evidence_grade": grade}
+    return Economics(projection, ue, scen, sens, flags, grade, reasons, computed)
+
+
 class Pipeline:
     def __init__(self, config: Config, llm=None, on_event: Optional[Callable[[dict], None]] = None) -> None:
         self.config = config
@@ -121,6 +149,7 @@ class Pipeline:
                 continue
             spec = specs.make_extra_specialist(role, str(item.get("focus") or role))
             spec.extra_task = str(item.get("questions") or item.get("focus") or role)
+            spec.focus = str(item.get("focus") or role)
             extras.append(spec)
         return extras
 
@@ -195,21 +224,13 @@ class Pipeline:
         context = "\n".join("%s agent: %s" % (r, _brief(res)) for r, res in results.items() if res.output)
         fin = self._guard(specs.FINANCIAL, ledger, focus, tasks["financial"], context)
         results["financial"] = fin
-        projection = project(fin.output.get("assumptions"))
+        eco = economics(results, fin.output, len(ledger.all()))
+        projection, ue, scen, sens, flags = eco.projection, eco.unit_economics, eco.scenarios, eco.sensitivity, eco.flags
+        grade, grade_reasons, computed = eco.grade, eco.grade_reasons, eco.computed
         if fin.error or not fin.output.get("assumptions"):
             warnings.append("Financial agent gave no usable assumptions; generic SaaS defaults were used.")
-        ue = unit_economics(projection.assumptions)
-        scen = scenarios(projection.assumptions)
-        sens = sensitivity(projection.assumptions)
-        mkt = results.get("market")
-        sam = ((mkt.output.get("tam_sam_som") or {}).get("sam_usd") if mkt and isinstance(mkt.output.get("tam_sam_som"), dict) else None)
-        flags = sanity_flags(projection, ue, sam)
-        grade, grade_reasons = quality.evidence_grade(results, len(ledger.all()))
 
         # 5. synthesizer gets the computed numbers, flags and grade so the verdict is grounded
-        computed = {"projection": projection.to_dict(), "unit_economics": ue, "sanity_flags": flags,
-                    "scenario_year5_operating_profit": {k: round(float(v.table.iloc[-1]["operating_profit"])) for k, v in scen.items()},
-                    "evidence_grade": grade}
         full_context = context + "\nfinancial agent: " + _brief(fin) + "\nCOMPUTED (authoritative): " + json.dumps(computed, default=str)[:3000]
         syn = self._guard(specs.SYNTHESIZER, ledger, focus, "Write the decision memo.", full_context)
         results["synthesizer"] = syn

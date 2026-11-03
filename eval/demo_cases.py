@@ -11,12 +11,13 @@ See docs/EVALUATION.md for how to read the metrics.
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from startup_cofounder.config import Config  # noqa: E402
-from startup_cofounder.pipeline import Pipeline  # noqa: E402
+from startup_cofounder.pipeline_v2 import build_pipeline  # noqa: E402
 from startup_cofounder.report import render_markdown  # noqa: E402
 
 CASES = [
@@ -61,25 +62,31 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mock", action="store_true")
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--engine", choices=["v2", "agentic"], help="pipeline to evaluate (default from config)")
+    parser.add_argument("--rounds", type=int, help="critic rounds")
     parser.add_argument("--only", help="substring filter on case name or idea")
     args = parser.parse_args()
-    config = Config.from_env(backend="mock" if args.mock else None, offline=True if args.offline else None)
+    config = Config.from_env(backend="mock" if args.mock else None, offline=True if args.offline else None,
+                             engine=args.engine, critic_rounds=args.rounds)
     config.output_dir.mkdir(exist_ok=True)
     rows = []
     for case in CASES:
         if args.only and args.only.lower() not in (case["name"] + case["idea"]).lower():
             continue
         print("running:", case["idea"], file=sys.stderr)
-        assessment = Pipeline(config).run(case["idea"])
-        rows.append({"case": case["name"], **score(assessment, case["known_competitors"])})
+        pipeline = build_pipeline(config)
+        started = time.time()
+        assessment = pipeline.run(case["idea"], fresh=True) if config.engine == "v2" else pipeline.run(case["idea"])
+        minutes = round((time.time() - started) / 60, 1)
+        rows.append({"case": case["name"], "engine": config.engine, "minutes": minutes, **score(assessment, case["known_competitors"])})
         (config.output_dir / ("eval-%s.md" % case["name"])).write_text(render_markdown(assessment))
     (config.output_dir / "eval-results.json").write_text(json.dumps(rows, indent=2))
 
-    print("\n%-10s %-7s %-8s %-9s %-7s %-6s" % ("case", "recall", "top3 ok", "fact %", "grade", "errors"))
+    print("\n%-10s %-7s %-8s %-9s %-7s %-6s %-6s" % ("case", "recall", "top3 ok", "fact %", "grade", "errors", "min"))
     for r in rows:
-        print("%-10s %-7s %-8s %-9s %-7s %-6s" % (
+        print("%-10s %-7s %-8s %-9s %-7s %-6s %-6s" % (
             r["case"], r["competitor_recall"], len(r["top3_known_hits"]), int(100 * r["fact_ratio"]),
-            r["evidence_grade"], len(r["agent_errors"])))
+            r["evidence_grade"], len(r["agent_errors"]), r["minutes"]))
     print("\nfull results: %s" % (config.output_dir / "eval-results.json"))
 
 
