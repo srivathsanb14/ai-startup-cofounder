@@ -22,6 +22,9 @@ Settings come from environment variables, optionally loaded from `.env` in the p
 | `SEARXNG_URL` | empty | Enables a SearXNG instance for `web_search` |
 | `DISABLED_TOOLS` | empty | Comma-separated tools hidden from the pipeline, e.g. `web_search` when no search provider is available |
 | `OFFLINE` | `0` | `1` disables all network tools |
+| `AGENT_DESIGN` | `questions` | `questions` = research-planning agent + question-scoped analysts + decision synthesis (report-v4, see [AGENTS_V4.md](AGENTS_V4.md)); `sections` = the previous section agents (report-v3) |
+| `QUESTION_REPAIRS` | `3` | Per-question repair attempts per run (questions with no usable evidence or judged off-question) |
+| `ILLUSTRATIVE_PROJECTION` | `0` | `1` adds an explicitly illustrative 5-year cohort projection even when its inputs are not evidence-based |
 
 ## Setting up Ollama with the script
 

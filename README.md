@@ -14,6 +14,12 @@ experiments to run next. Every claim is labelled **fact** (with a citation you c
 > This is preliminary desk research. It tells you which assumptions to test first; it does not replace
 > talking to customers.
 
+> **Reliability workflow (Nov 2026).** Research is now a bounded adaptive loop (agents request searches and page
+> reads; Python validates and runs them). Evidence is gated by relevance, competitors need identity evidence,
+> claims carry exact passages and support status, retries are measured, financial inputs are validated against
+> willingness to pay, and the memo is checked against the computed numbers before it is saved. The report shows
+> execution status separately from research quality. See [docs/RELIABILITY.md](docs/RELIABILITY.md).
+
 ---
 
 ## Why this is different from asking a chatbot
@@ -31,34 +37,40 @@ experiments to run next. Every claim is labelled **fact** (with a citation you c
 
 ## How it works
 
-The pipeline **retrieves first, then extracts**: code gathers evidence, and the model only reads it and
-answers in a fixed JSON schema. Every stage is checkpointed, so an interrupted run resumes.
+The default design (`AGENT_DESIGN=questions`, report-v4) works like a careful analyst: first understand the idea,
+then answer specific questions with targeted evidence, then decide. Models make small, narrow JSON calls; code does
+the searching, validation, arithmetic and synthesis. Every stage is checkpointed, so an interrupted run resumes.
 
 ```
- rough idea
+ founder's idea
      │
      ▼
- Coordinator ─► category, problem, tasks, optional extra specialists          (fast model)
+ Research-planning agent ─► idea brief (founder's words kept; drift flagged) + assumptions map
+     │                       (desirability / viability / feasibility hypotheses, most important first)
+     ▼
+ Competitor identity agent ─► verified direct competitors, substitutes, adjacent products
      │
      ▼
- Retrieval (no LLM): templated searches in parallel ─► top pages fetched in full ─► passages
-     │                                   shared evidence ledger: every source gets an id E1, E2, ...
-     ▼
- Extraction (parallel, schema-constrained, reads ranked evidence packs)       (fast model)
-   customer │ market │ technical │ extras │ competitors:
-                                            names ─► ranked by evidence ─► each top name searched + profiled
+ Question analysts (one small call each): problem & frequency, current workarounds, willingness to pay,
+   revenue models, local market count, channels, feasibility, failure cases, competitor complaints,
+   cold start and trust (network products)
+     targeted queries by source type + a disconfirming query ─► packet (≤2 items per website)
+     ─► findings typed fact/estimate, stance supports/contradicts ─► code validation (support, independence,
+     geography, question fit, product-vs-customer)
      │
      ▼
- Review: rule checks + critic ─► weak sections get follow-up searches and a redo
+ Question-fit review (1 call) ─► bounded repairs of the weakest questions (kept only if measurably better)
      │
      ▼
- Financial assumptions ─► finance.py (pandas): projection, unit economics, scenarios, sensitivity
+ Deterministic: stage-appropriate economics (solo / part-time / venture) ─► cross-section checks
+   ─► 3-5 key findings ─► conditional verdict ─► 2-3 experiments for the riskiest assumptions
      │
      ▼
- Synthesizer ─► verdict ─► guardrail ─► report.md + report.json               (main model)
+ Decision memo (7 sections, ~2-4 pages) + evidence appendix + JSON; numbers checked by a publication gate
 ```
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Details: [docs/AGENTS_V4.md](docs/AGENTS_V4.md). The previous section workflow is still available with
+`AGENT_DESIGN=sections` ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
 ## Quick start
 
@@ -109,22 +121,21 @@ not research, and the report says so.
 
 ## What's in the report
 
-| Section | Source |
+| Memo section | Built from |
 |---|---|
-| **At a glance**: verdict, evidence grade A-D, feasibility, LTV/CAC, break-even, peak funding | computed |
-| Verdict + rationale (guardrail note if it was downgraded) | LLM, checked by code |
-| Executive summary, scope (target customer, MVP, out of scope, success definition) | LLM |
-| Potential customers (segments, pain points, willingness to pay) | Customer agent |
-| **Top-3 competitors** with pricing, strengths, weaknesses, "seen in sources" check | Competitor agent + code |
-| Market: TAM / SAM / SOM with method, trends, headwinds | Market agent |
-| Technical feasibility: score, components, build vs buy, MVP time and team | Technical agent |
-| Additional research (idea-specific specialists) | Dynamic agents |
-| **Organizational structure** and hiring timeline | Financial agent |
-| **5-year projection**: revenue, costs, profit, cumulative cash, break-even | `finance.py` |
-| Unit economics, **scenarios** (pessimistic/base/optimistic), **sensitivity**, sanity checks | `finance.py` |
-| Risks and **ranked validation experiments** | Synthesizer |
-| Future outlook (3-5 years) | Synthesizer |
-| Quality review log, evidence quality breakdown, all sources | code |
+| The founder's idea (verbatim) and how it was read; interpretation flags | research-planning agent + fidelity check |
+| 1. Recommendation (proceed / validate first / modify / abandon), 3-5 key findings with implications, proceed-if / modify-if / stop-if | deterministic synthesis |
+| 2. Customer problem and evidence (problem, frequency, workarounds, willingness to pay; evidence level per hypothesis) | question analysts, validated |
+| 3. Competitive landscape and differentiation | competitor identity agent + complaints about alternatives |
+| 4. Market opportunity and distribution (local count or bottom-up method; channels; cold start) | question analysts + synthesis |
+| 5. Product feasibility and business economics (MVP cost, monthly costs, break-even volume, funding to next milestone, by scenario) | `economics2.py` |
+| 6. Most consequential risks, each linked to the experiment that reduces it | synthesis |
+| 7. 2-3 validation experiments (hypothesis, segment, method, metric, threshold, cost, duration, meaning, next step) | synthesis |
+| Appendix: idea brief, assumptions map, every question with queries, packet, findings and validation notes, economics assumptions with basis and sensitivity, cross-section checks, report checks, research-run evidence log | code |
+
+Regenerate an older saved run in this format (no new searches, no model calls):
+`python -m startup_cofounder.regenerate outputs/<file>.json` (add `--with-model` to let your local model read the
+saved evidence, or `--v3` for the previous format).
 
 ## Command line options
 
@@ -146,7 +157,8 @@ All settings and environment variables: [docs/CONFIGURATION.md](docs/CONFIGURATI
 ## Testing and evaluation
 
 ```bash
-pytest -q                                   # 38 tests, no network or model needed
+pytest -q                                   # 161 tests, no network or model needed
+python eval/report_rubric.py                # old vs new report comparison (mechanical, transparent)
 python eval/demo_cases.py                   # Airbnb/Duolingo/Zoom/Uber-style ideas, live
 python eval/demo_cases.py --only uber       # one case
 ```
