@@ -5,12 +5,13 @@ reading the evidence that was gathered.
 """
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .evidence import EvidenceLedger
-from .passages import PassageIndex, rank
+from .passages import PassageIndex, bm25, rank
 from .tools import ALL_TOOLS, get_tools
 from .tools.search import page_text
 
@@ -127,28 +128,88 @@ def fetch_pages(ids_by_section: Dict[str, List[str]], ledger: EvidenceLedger, in
         return sum(pool.map(one, urls))
 
 
-def evidence_pack(question: str, ids: Sequence[str], ledger: EvidenceLedger, index: PassageIndex,
-                  n_snippets: int = 10, n_passages: int = 8, passage_chars: int = 650) -> Tuple[str, List[str]]:
-    """Most relevant search snippets and full-page passages for `question`, formatted for a prompt.
+def fetch_url(url: str, index: PassageIndex) -> bool:
+    """Download one page and index its passages. Callers validate the URL first (research.validate_action)."""
+    if not _fetchable(url) or url in index.docs:
+        return False
+    try:
+        title, text = page_text(url)
+        return bool(text and index.add(url, title, text))
+    except Exception:
+        return False
 
-    Selected passages are registered in the ledger so they can be cited and grounding-checked like any source.
+
+def _dupe_key(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", text.lower()))[:160]
+
+
+def select_evidence(question: str, ids: Sequence[str], ledger: EvidenceLedger, index: PassageIndex, book=None,
+                    n_snippets: int = 10, n_passages: int = 8) -> Tuple[List, List[dict]]:
+    """Relevance-gated, de-duplicated evidence for `question`, best first.
+
+    With a RelevanceBook, irrelevant sources are excluded outright (never used to fill slots) and the BM25 order is
+    weighted by relevance. Returns (sources, selection log entries).
     """
     snippets = [s for s in (ledger.get(i) for i in ids) if s is not None]
-    top_snippets = rank(question, snippets, lambda s: s.text, n_snippets)
+    log: List[dict] = []
+    if book is not None:
+        kept = []
+        for s in snippets:
+            rel = book.of(s)
+            if rel.label == "irrelevant":
+                log.append({"id": s.id, "decision": "excluded", "why": "irrelevant to research frame"})
+            else:
+                kept.append(s)
+        snippets = kept
+    scores = bm25(question, [s.text for s in snippets])
+    weight = (lambda s: 0.5 + book.of(s).score) if book is not None else (lambda s: 1.0)
+    order = sorted(range(len(snippets)), key=lambda i: -(scores[i] * weight(snippets[i])))
+    top_snippets = [snippets[i] for i in order if scores[i] > 0 or book is None][:n_snippets]
     urls = []
     for s in snippets:
-        if s.url and s.url not in urls:
-            urls.append(s.url)
+        base = s.url.split("#p")[0]
+        if base and base not in urls:
+            urls.append(base)
     passages = index.passages(urls)
-    top_passages = rank(question, passages, lambda p: p[3], n_passages)
-
+    p_scores = bm25(question, [p[3] for p in passages])
+    p_order = sorted(range(len(passages)), key=lambda i: -p_scores[i])
     chosen = list(top_snippets)
-    for url, title, i, text in top_passages:
-        chosen += ledger.add("passage", [{"title": "%s (excerpt)" % title, "url": "%s#p%d" % (url, i), "snippet": text}])
-    lines, out_ids = [], []
-    for s in chosen:
-        if s.id in out_ids:
+    for i in p_order[: n_passages * 2]:
+        if len([c for c in chosen if c.tool == "passage"]) >= n_passages:
+            break
+        url, title, j, text = passages[i]
+        if p_scores[i] <= 0 and book is not None:
             continue
-        out_ids.append(s.id)
-        lines.append("[%s] %s\n    url: %s\n    %s" % (s.id, s.title, s.url, s.snippet[:passage_chars]))
-    return ("\n".join(lines) if lines else "(no evidence could be retrieved)"), out_ids
+        src = ledger.add("passage", [{"title": "%s (excerpt)" % title, "url": "%s#p%d" % (url, j), "snippet": text}])[0]
+        if book is not None and book.of(src).label == "irrelevant":
+            log.append({"id": src.id, "decision": "excluded", "why": "passage irrelevant to research frame"})
+            continue
+        chosen.append(src)
+    out, seen = [], set()
+    for s in chosen:
+        key = _dupe_key(s.snippet or s.title)
+        if s.id in {o.id for o in out}:
+            continue
+        if key in seen:
+            log.append({"id": s.id, "decision": "excluded", "why": "duplicate passage"})
+            continue
+        seen.add(key)
+        out.append(s)
+        entry = {"id": s.id, "decision": "selected"}
+        if book is not None:
+            entry["relevance"] = book.of(s).to_dict()
+        log.append(entry)
+    return out, log
+
+
+def format_source(s, chars: int = 650) -> str:
+    from .relevance import neutralize
+    return "[%s] %s\n    url: %s\n    %s" % (s.id, neutralize(s.title), s.url, neutralize(s.snippet[:chars]))
+
+
+def evidence_pack(question: str, ids: Sequence[str], ledger: EvidenceLedger, index: PassageIndex,
+                  n_snippets: int = 10, n_passages: int = 8, passage_chars: int = 650, book=None) -> Tuple[str, List[str]]:
+    """Formatted evidence for a prompt (kept for callers that do not do token fitting themselves)."""
+    chosen, _ = select_evidence(question, ids, ledger, index, book, n_snippets, n_passages)
+    lines = [format_source(s, passage_chars) for s in chosen]
+    return ("\n".join(lines) if lines else "(no evidence could be retrieved)"), [s.id for s in chosen]

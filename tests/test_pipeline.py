@@ -181,8 +181,9 @@ def test_end_to_end_mock_offline(tmp_path):
     assert not any(r.error for r in result.results.values())
     assert len(result.results["competitor"].output["competitors"]) >= 3
     assert result.extra_roles == ["regulatory"]
-    md = render_markdown(result)
-    for heading in ("## At a glance", "## Competitive landscape (top 3)", "### Scenarios", "## Quality review"):
+    md = render_markdown(result)  # main report = founder decision memo (report-v3)
+    for heading in ("## 1. Decision and rationale", "## 3. Competition and reason to switch",
+                    "## 6. Business model and economics", "## 7. Prioritized validation plan"):
         assert heading in md
     assert not any("failed" in w for w in result.warnings)
     # no web evidence offline, so nothing may be presented as a sourced fact
@@ -195,14 +196,17 @@ def stub_web(monkeypatch):
     titles = ["Zoomly video calls review", "Meetio pricing plans compared", "Callrix alternatives guide",
               "Talkify features for remote teams"]
 
+    # Each stub page says what the product is (video calling): since the reliability rework a competitor needs
+    # positive evidence of being in the product category, not just a name that appears somewhere.
     def search(query):
         return ToolResult(sources=[{"title": t, "url": "http://web.test/%s" % t.split()[0].lower(),
-                                    "snippet": t + " for remote teams, from 12 dollars per month."} for t in titles])
+                                    "snippet": t + ": video calling app for remote teams, from 12 dollars per month."}
+                                   for t in titles])
 
     for name in ("web_search", "news_search", "wikipedia", "hn_search"):
         monkeypatch.setitem(ALL_TOOLS, name, _tool(name, search))
     monkeypatch.setattr(retrieval, "page_text", lambda url, limit=30000: (
-        "Page", "Pricing and plans for remote teams. The team plan costs 12 dollars per month. " * 12))
+        "Page", "Video calling pricing and plans for remote teams. The team plan costs 12 dollars per month. " * 12))
 
 
 def test_with_evidence_cites_discovers_and_verifies(tmp_path, stub_web):
@@ -225,7 +229,8 @@ class Counting(MockLLM):
 
 
 def test_resume_skips_finished_stages(tmp_path, stub_web):
-    cfg = _config(tmp_path)
+    # sequential (as on the 8 GB Mac): with parallel sections, the shared run budget makes call counts vary
+    cfg = _config(tmp_path, max_workers=1)
     first = Counting()
     a = Pipeline(cfg, llm=first).run(IDEA)
     assert len(first.calls) > 8
@@ -251,7 +256,11 @@ def test_review_loop_reruns_flagged_section(tmp_path, stub_web):
     result = Pipeline(_config(tmp_path), llm=llm).run(IDEA)
     assert llm.calls.count("ROLE: market") == 2
     entry = [e for e in result.review_log if e["agent"] == "market"][0]
-    assert entry["improved"] is True and entry["origin"] == "critic"
+    assert "critic" in entry["origin"]
+    # The mock returns an identical answer on retry. Before the reliability rework this was logged as
+    # "improved" just because the retry produced valid JSON; now it is measured and labelled honestly.
+    assert entry["outcome"] == "unchanged" and entry["improved"] is False and entry["kept"] == "previous"
+    assert "find reports" in entry["instructions_sent"]
 
 
 class FlakyTechnical(Counting):
@@ -308,7 +317,7 @@ class BrokenLLM:
 def test_pipeline_survives_garbage_model(tmp_path):
     result = Pipeline(_config(tmp_path, offline=True), llm=BrokenLLM()).run("A marketplace for used lab equipment")
     assert result.warnings
-    assert "Financial projection" in render_markdown(result)  # must still render with defaults
+    assert "What the current scenario shows" in render_markdown(result)  # must still render with defaults
 
 
 def test_extra_specialists_sanitized_and_capped(tmp_path):
@@ -332,10 +341,14 @@ def test_pipeline_populates_all_outputs(tmp_path):
     assert len(result.sensitivity) == 6 and result.unit_economics["ltv_cac"]
     assert result.grade == "D" and result.verdict in ("go", "validate_first", "pivot", "no_go")
     md = render_markdown(result)
-    for heading in ("## Verdict", "## Financial projection", "## Recommended validation steps",
-                    "## Evidence quality", "### Unit economics", "### What matters most",
-                    "## Additional research: Regulatory"):
+    for heading in ("## 1. Decision and rationale", "## 6. Business model and economics",
+                    "## 7. Prioritized validation plan"):
         assert heading in md
+    from startup_cofounder.report import render_appendix
+    appendix = render_appendix(result)  # details live in the appendix, not the memo
+    for heading in ("## C. Claims and support", "## E. Financial calculations", "## G. Research history and budgets"):
+        assert heading in appendix
+    assert "Year-5 result if lower" in appendix  # sensitivity table
 
 
 class OptimisticLLM(MockLLM):
